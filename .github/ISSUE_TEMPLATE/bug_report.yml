@@ -1,0 +1,59 @@
+name: Bug report
+description: Something is broken or renders incorrectly
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please include console output. For visual issues, attach a screenshot.
+  - type: input
+    id: codex-version
+    attributes:
+      label: Codex version
+      placeholder: e.g. 26.1027.3384.0
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS / GPU
+      placeholder: Windows 11 23H2 / RTX 3060
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Mode
+      options:
+        - Standalone preview (npm run dev)
+        - Injected into Codex
+        - Build / CI
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. npm run dev
+        2. open ?mock=0
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: console
+    attributes:
+      label: Console / terminal output
+      render: shell
+  - type: textarea
+    id: extra
+    attributes:
+      label: Additional context
+      description: Asset format, model size, quality preset, screenshots.
+

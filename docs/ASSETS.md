@@ -1,0 +1,89 @@
+# Assets
+
+## Background image
+
+Supported names, checked in order:
+
+```text
+public/assets/background.webp
+public/assets/background.png
+public/assets/background.jpg
+public/assets/background.jpeg
+```
+
+Recommendations:
+
+- 2560×1440 or 3840×2160, 16:9.
+- Keep the visual focus away from the exact center if a model will sit there.
+- Leave some low-contrast area for text readability; the app also applies `dim`.
+- WebP q85–q90 is usually 3–5× smaller than PNG.
+- Avoid transparent PNG backgrounds; the shader expects an opaque image.
+
+The image is sampled by a fullscreen shader with cover-fit behavior, so non-16:9 images are cropped rather than stretched.
+
+## Models
+
+Supported names:
+
+```text
+public/assets/model.glb
+public/assets/model.gltf
+```
+
+For `.gltf`, keep the `.bin`, textures, and any `.ktx2` files next to it and update relative URIs if needed. GLB is strongly preferred.
+
+### Tripo export checklist
+
+1. Export **GLB**, not OBJ/FBX, unless you have a specific reason.
+2. Include textures in the file; avoid external texture folders.
+3. Keep the model under ~15 MB and textures at 2K or below.
+4. If the exporter offers Draco or Meshopt compression, it is safe to enable.
+5. Remove cameras, lights, and animation tracks you do not need.
+6. Apply transforms before export so the bounding box is meaningful.
+
+### Auto-fit behavior
+
+`src/scene/model.js` does the following on load:
+
+```text
+Box3.setFromObject(model)
+center = box center
+scale  = 3.35 / max(box size)
+model.position = -center * scale
+model.scale    = scale
+```
+
+Then a wireframe shell is placed around the model and the whole group is added to a spinner that rotates on Y.
+
+This means:
+
+- absolute model size in the GLB does not matter;
+- asymmetric pivots are corrected automatically;
+- very thin models may look small because the longest edge drives the scale;
+- use the `modelScale`, `modelX`, `modelY` settings to fine-tune.
+
+### Compression support
+
+| Format | Loader | Notes |
+| --- | --- | --- |
+| Plain GLB / glTF | `GLTFLoader` | baseline |
+| Draco | `DRACOLoader` | decoder copied to `public/vendor/draco/` |
+| Meshopt | `MeshoptDecoder` | bundled in the IIFE |
+| KTX2 / Basis | `KTX2Loader` | decoder copied to `public/vendor/basis/` |
+
+Run `npm run sync:decoders` after `npm install` if `public/vendor/` is missing.
+
+## Performance
+
+| Symptom | Fix |
+| --- | --- |
+| Low FPS on integrated GPU | `quality: 'low'`, disable particles |
+| Stutter when moving the mouse | reduce `parallax`, lower DPR |
+| Bloom looks blown out | lower `bloom` to 0.5–0.7 |
+| Background too busy behind text | raise `dim`, lower `grain` |
+| Model too large / off-center | adjust `modelScale`, `modelX`, `modelY` |
+
+## Licensing
+
+Only commit assets you created or have a license to redistribute. `public/assets/*` is gitignored for this reason; the repository ships with no third-party art or models.
+

@@ -1,0 +1,50 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Sync decoders
+        run: npm run sync:decoders
+
+      - name: Build preview
+        run: npm run build
+
+      - name: Build injection bundle
+        run: npm run embed
+
+      - name: Syntax check tools
+        run: |
+          node --check tools/inject.mjs
+          node --check tools/sync-decoders.mjs
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-dynamic-bg-dist
+          path: |
+            dist
+            dist-embed
+          if-no-files-found: error
+          retention-days: 14
+

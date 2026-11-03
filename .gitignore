@@ -1,0 +1,26 @@
+node_modules/
+dist/
+dist-embed/
+_ref/
+
+# Generated at install/build time by tools/sync-decoders.mjs
+public/vendor/
+
+# User-supplied art and models
+public/assets/*
+!public/assets/README.md
+!public/assets/.gitkeep
+
+# Local env / editor / OS noise
+.env
+.env.*
+!.env.example
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.log
+npm-debug.log*
+
+# Local screenshots that are not part of the docs
+.shots/
+

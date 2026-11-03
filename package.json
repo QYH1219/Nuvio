@@ -1,0 +1,40 @@
+{
+  "name": "codex-dynamic-bg",
+  "private": true,
+  "version": "0.2.0",
+  "description": "A transparent, animated WebGL background layer for Codex Desktop, with custom images and Tripo GLB models.",
+  "license": "MIT",
+  "keywords": [
+    "codex",
+    "webgl",
+    "three.js",
+    "dynamic-background",
+    "glb",
+    "tripo",
+    "electron",
+    "cdp"
+  ],
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 5273",
+    "predev": "node tools/sync-decoders.mjs",
+    "build": "vite build",
+    "prebuild": "node tools/sync-decoders.mjs",
+    "preview": "vite preview --host 127.0.0.1 --port 5274",
+    "preembed": "node tools/sync-decoders.mjs",
+    "embed": "vite build --mode embed",
+    "build:all": "npm run embed && npm run build",
+    "inject": "node tools/inject.mjs",
+    "launch:codex": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/launch-codex.ps1",
+    "sync:decoders": "node tools/sync-decoders.mjs"
+  },
+  "dependencies": {
+    "three": "^0.180.0"
+  },
+  "devDependencies": {
+    "vite": "^6.4.5"
+  }
+}
