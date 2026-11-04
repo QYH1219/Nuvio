@@ -34,6 +34,8 @@ function parseArgs(argv) {
     bundle: DEFAULT_BUNDLE,
     target: '',
     image: '',
+    video: '',
+    scene: '',
     model: '',
     surface: null,
     dim: null,
@@ -58,6 +60,8 @@ function parseArgs(argv) {
     else if (arg === '--bundle') options.bundle = resolve(next());
     else if (arg === '--target') options.target = next();
     else if (arg === '--image') options.image = next();
+    else if (arg === '--video') options.video = next();
+    else if (arg === '--scene') options.scene = next();
     else if (arg === '--model') options.model = next();
     else if (arg === '--surface') options.surface = Number(next());
     else if (arg === '--dim') options.dim = Number(next());
@@ -86,6 +90,8 @@ Options:
   --bundle PATH        embedded IIFE bundle (default: dist-embed/codex-dynamic-bg.iife.js)
   --target TEXT        page target id/title/url substring
   --image URL          explicit background URL or /assets/... path
+  --video URL          explicit video background URL or /assets/... path
+  --scene URL          explicit scene.json URL or /assets/... path
   --model URL          explicit GLB/glTF URL or /assets/... path
   --surface NUMBER     Codex panel opacity, 0..1 (default 0.22; lower = clearer background)
   --dim NUMBER         background dim, 0..1 (default 0.12)
@@ -342,6 +348,8 @@ async function main() {
   const bundle = readFileSync(options.bundle, 'utf8');
   const explicitAssets = {
     imageUrl: withAssetBase(options.image, assetBase),
+    videoUrl: withAssetBase(options.video, assetBase),
+    sceneUrl: withAssetBase(options.scene, assetBase),
     modelUrl: withAssetBase(options.model, assetBase),
   };
   const overrides = {};

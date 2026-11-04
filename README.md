@@ -62,7 +62,22 @@ npm run dev
 
 ## 放入素材
 
-把文件丢进 `public/assets/`，文件名保持下面任意一种，代码会自动探测：
+一条命令安装并规范化素材，同时清掉优先级更高的旧文件（否则会出现“换了图还在放旧视频”）：
+
+```bash
+npm run use -- "C:\Pictures\my-bg.png"              # 图片 png/jpg/webp/avif
+npm run use -- "C:\Videos\loop.mp4"                 # 视频 mp4/webm（mov 需 ffmpeg）
+npm run use -- "C:\Models\figure.glb"               # Tripo 导出的模型
+npm run use -- "D:\steam\steamapps\workshop\content\431960\3806385218"
+                                                    # Wallpaper Engine 工程，自动识别 image/video/scene
+npm run use -- --scene "C:\path\to\unpacked-scene"  # 已解包的 scene 目录
+npm run use -- --clear                              # 只清背景，保留模型
+npm run use -- --dry-run                            # 只打印计划，不动文件
+```
+
+安装后：预览模式刷新页面即可；注入模式需要重新构建，`npm run embed && npm run inject`。
+
+也可以手动丢文件进 `public/assets/`，代码会按优先级探测：
 
 ```text
 public/assets/background.webp   # 或 .png / .jpg / .jpeg

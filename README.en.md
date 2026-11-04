@@ -59,7 +59,22 @@ Shortcuts: `G` toggles settings, `H` toggles the HUD, `Esc` closes the panel.
 
 ## Add your assets
 
-Drop files into `public/assets/` using any of these names:
+One command installs and normalizes assets, and removes higher-priority leftovers so switching from a video to a still image actually takes effect:
+
+```bash
+npm run use -- "C:\Pictures\my-bg.png"              # png/jpg/webp/avif
+npm run use -- "C:\Videos\loop.mp4"                 # mp4/webm (.mov needs ffmpeg)
+npm run use -- "C:\Models\figure.glb"               # Tripo export
+npm run use -- "D:\steam\steamapps\workshop\content\431960\3806385218"
+                                                    # Wallpaper Engine project, auto-detected
+npm run use -- --scene "C:\path\to\unpacked-scene"  # already-unpacked scene
+npm run use -- --clear                              # clear background, keep the model
+npm run use -- --dry-run                            # print the plan only
+```
+
+After installing: refresh the preview, or rebuild for injection with `npm run embed && npm run inject`.
+
+You can also drop files into `public/assets/` manually using any of these names:
 
 ```text
 public/assets/background.webp   # or .png / .jpg / .jpeg

@@ -1,5 +1,40 @@
 # Assets
 
+## One-shot installer
+
+`tools/use.mjs` copies an asset into the exact filename the runtime probes and
+deletes the entries that would outrank it. This avoids the classic "I replaced
+the image but the old video is still playing" problem.
+
+```bash
+npm run use -- "C:\Pictures\my-bg.png"
+npm run use -- "C:\Videos\loop.mp4"
+npm run use -- "C:\Models\figure.glb"
+npm run use -- "D:\steam\steamapps\workshop\content\431960\3806385218"
+npm run use -- --scene "C:\path\to\unpacked-scene"
+npm run use -- --clear
+npm run use -- --dry-run
+```
+
+Behavior:
+
+- A file is classified by extension and renamed to `background.<ext>` or `model.<ext>`.
+- A Wallpaper Engine project (`project.json` / `scene.pkg`) is handed to `tools/wallpaper.mjs`.
+- An already-unpacked scene directory (`scene.json` without `image`) is normalized by the same importer.
+- A normalized scene directory (`scene.json` with `image`) is copied to `public/assets/wallpaper/`.
+- Installing any background removes the other background kinds, matching the probe order below.
+- `--clear` removes image/video/scene but leaves models alone.
+- `--dry-run` prints every copy and removal without touching the filesystem.
+
+Probe order used by `src/assets.js`:
+
+```text
+video (mp4/webm) > scene (wallpaper/scene.json) > image (webp/png/jpg/jpeg/avif) > placeholder
+```
+
+After installing, refresh the dev preview, or run `npm run embed && npm run inject`
+for the injected Codex build.
+
 ## Background image
 
 Supported names, checked in order:
@@ -9,6 +44,7 @@ public/assets/background.webp
 public/assets/background.png
 public/assets/background.jpg
 public/assets/background.jpeg
+public/assets/background.avif
 ```
 
 Recommendations:

@@ -30,7 +30,8 @@
     "inject": "node tools/inject.mjs",
     "launch:codex": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/launch-codex.ps1",
     "sync:decoders": "node tools/sync-decoders.mjs",
-    "wallpaper": "node tools/wallpaper.mjs"
+    "wallpaper": "node tools/wallpaper.mjs",
+    "use": "node tools/use.mjs"
   },
   "dependencies": {
     "three": "^0.180.0"

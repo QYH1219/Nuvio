@@ -3,6 +3,7 @@ const IMAGE_CANDIDATES = [
   'assets/background.png',
   'assets/background.jpg',
   'assets/background.jpeg',
+  'assets/background.avif',
 ];
 
 const MODEL_CANDIDATES = ['assets/model.glb', 'assets/model.gltf'];
