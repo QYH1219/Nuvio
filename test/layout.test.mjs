@@ -42,7 +42,7 @@ test('injected wallpaper mode turns off Codex workspace pseudo surfaces', () => 
   assert.match(embed, /html\[data-cxd-wallpaper="on"\]/);
   assert.match(
     embed,
-    /\[class\*="_WorkspaceContent_"\]::before\s*\{[^}]*display:\s*none/s,
+    /\[class\*="WorkspaceContent"\]::before\s*\{[^}]*display:\s*none/s,
     'the WorkspaceContent surface pseudo-element must be removed',
   );
   assert.doesNotMatch(
@@ -60,18 +60,23 @@ test('wallpaper mode clears the sidebar and composer surfaces', () => {
   );
   assert.match(
     embed,
-    /\[class\*="_ComposerLayoutRoot_"\][^}]*background-color:\s*var\(--cxd-composer-tint/,
+    /\[class\*="ComposerLayoutRoot"\][^}]*background-color:\s*var\(--cxd-composer-tint/,
     'the composer must use the lighter translucent composer tint',
   );
   assert.match(
     embed,
-    /\[class\*="_background_18hic_"\][\s\S]*?\[class\*="_fade_18hic_"\][\s\S]*?background-image:\s*none !important/,
+    /\[data-thread-scroll-footer\] \[class\*="background-"\][\s\S]*?\[class\*="fade-"\][\s\S]*?background-image:\s*none !important/,
     'the solid composer strip and its white fade must be removed',
   );
   assert.match(
     embed,
-    /\[class\*="_strip_b6c3p_"\] \[class\*="bg-surface-elevated-secondary"\]/,
+    /\[class\*="strip-"\] \[class\*="bg-surface-elevated-secondary"\]/,
     'the workspace tab pill needs its own translucent override',
+  );
+  assert.match(
+    embed,
+    /\[class\*="ComposerLayoutAttachments"\]/,
+    'the composer attachment strip must not paint an opaque band',
   );
 });
 
@@ -86,12 +91,12 @@ test('base panel tint stays out of wallpaper mode', () => {
 test('landing-page composer body and action bar are flattened', () => {
   assert.match(
     embed,
-    /\[class\*="_ComposerLayoutBody_"\][\s\S]*?\[class\*="bg-background-composer-action-bar"\][\s\S]*?background-color:\s*transparent !important/,
+    /\[class\*="ComposerLayoutBody"\][\s\S]*?\[class\*="bg-background-composer-action-bar"\][\s\S]*?background-color:\s*transparent !important/,
     'the solid editor body and grey action bar must not paint over the wallpaper',
   );
   assert.match(
     embed,
-    /\[class\*="_ComposerLayoutRoot_"\][^}]*background-color:\s*var\(--cxd-composer-tint/,
+    /\[class\*="ComposerLayoutRoot"\][^}]*background-color:\s*var\(--cxd-composer-tint/,
     'the composer root must use the dedicated translucent tint',
   );
 });
@@ -99,12 +104,17 @@ test('landing-page composer body and action bar are flattened', () => {
 test('wallpaper mode removes titlebar and thread hairline seams', () => {
   assert.match(
     embed,
-    /\[data-app-shell-header-layout\]::after[\s\S]*?div\[class\*="_shiftWithTranscript_"\]\.h-px[\s\S]*?display:\s*none !important/,
+    /\[data-app-shell-header-layout\]::after[\s\S]*?div\[class\*="shiftWithTranscript"\]\.h-px[\s\S]*?display:\s*none !important/,
     'only the 1px header/thread separators must be hidden',
   );
   assert.doesNotMatch(
     embed,
-    /\[class\*="_shiftWithTranscript_"\]\s*\{[^}]*display:\s*none/s,
+    /\[class\*="shiftWithTranscript"\]\s*\{[^}]*display:\s*none/s,
     'hiding the whole hashed class would remove the transcript and footer too',
+  );
+  assert.match(
+    embed,
+    /\[class\*="MainContentTopFade"\]\s*\{[^}]*display:\s*none !important/s,
+    'the white top scroll fade must be removed over a wallpaper',
   );
 });

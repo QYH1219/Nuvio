@@ -2,6 +2,29 @@
 
 All notable changes to this project are documented here.
 
+## [0.6.1] - 2026-11-04
+
+### Fixed
+
+- Newer Codex builds changed hashed class names from `_ComposerLayoutRoot_…` to
+  `ComposerLayoutRoot-…`. Nuvio now matches the stable component name instead
+  of the leading underscore, so the composer, workspace, page surface, footer,
+  and transcript selectors work across both naming schemes.
+- Removed the opaque composer body, attachment strip, action bar, footer
+  background, dark/white scroll fades, and the `MainContentTopFade` white band
+  in wallpaper mode. The chat box and the area above it now show the wallpaper
+  instead of reverting to a white card or a horizontal white seam.
+- The floating turn-summary pill (`N 个文件已更改`) now uses a lighter frosted
+  tint instead of a solid white block.
+- The lazy injector loader revalidates `codex-dynamic-bg.iife.js` with the local
+  asset server (`no-cache`). Rebuilding the skin no longer leaves Codex running
+  the previous cached bundle.
+
+### Tests
+
+- Updated layout regression tests for both hashed class-name formats and added
+  coverage for the attachment strip and top scroll fade.
+
 ## [0.6.0] - 2026-11-04
 
 ### Added

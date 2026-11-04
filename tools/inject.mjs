@@ -988,7 +988,10 @@ async function main() {
     const loader = `
 (() => {
   const url = ${JSON.stringify(bundleUrl)};
-  fetch(url, { cache: 'force-cache' })
+  // Revalidate with the local asset server instead of trusting the HTTP cache.
+  // The bundle is rebuilt whenever the skin changes; force-cache would keep
+  // serving the previous build until the URL's version stamp changes.
+  fetch(url, { cache: 'no-cache' })
     .then((res) => {
       if (!res.ok) throw new Error('HTTP ' + res.status);
       return res.text();

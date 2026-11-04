@@ -82,7 +82,7 @@ html[data-cxd-wallpaper="on"] body :is(
 }
 
 html[data-cxd-wallpaper="on"] body [data-app-shell-main-surface="default"] > div::before,
-html[data-cxd-wallpaper="on"] body [class*="_WorkspaceContent_"]::before {
+html[data-cxd-wallpaper="on"] body [class*="WorkspaceContent"]::before {
   display: none !important;
   background: transparent !important;
   background-image: none !important;
@@ -138,15 +138,18 @@ html[data-cxd-wallpaper="on"] body :is(
 
 /* Composer: Codex paints an opaque surface plus a long white fade above it. */
 html[data-cxd-wallpaper="on"] body :is(
-  [class*="_ComposerLayoutRoot_"],
-  [class*="_ComposerRoot_"],
-  [class*="_footer_1q9qf_"]
+  [class*="ComposerLayoutRoot"],
+  [class*="ComposerRoot"],
+  [data-thread-scroll-footer]
 ) {
   background-color: transparent !important;
   background-image: none !important;
 }
 
-html[data-cxd-wallpaper="on"] body [class*="_ComposerLayoutRoot_"] {
+/* Newer Codex builds hash class names as ComposerLayoutRoot-XCKS7O, older
+   ones as _ComposerLayoutRoot_xxxxxx. Match the component name only so the
+   skin survives either naming scheme. */
+html[data-cxd-wallpaper="on"] body [class*="ComposerLayoutRoot"] {
   background-color: var(--cxd-composer-tint, rgba(255, 255, 255, 0.06)) !important;
   border-color: var(--cxd-composer-border, rgba(255, 255, 255, 0.18)) !important;
   backdrop-filter: blur(6px) saturate(1.05) !important;
@@ -156,9 +159,10 @@ html[data-cxd-wallpaper="on"] body [class*="_ComposerLayoutRoot_"] {
 /* The landing-page composer paints an extra solid body plus a grey action bar
    inside the frosted root. Both cover the wallpaper like a white card. */
 html[data-cxd-wallpaper="on"] body :is(
-  [class*="_ComposerLayoutBody_"],
-  [class*="_ComposerLayoutFooter_"],
-  [class*="_ComposerLayoutInput_"],
+  [class*="ComposerLayoutBody"],
+  [class*="ComposerLayoutFooter"],
+  [class*="ComposerLayoutInput"],
+  [class*="ComposerLayoutAttachments"],
   [class*="bg-background-composer-action-bar"]
 ) {
   background-color: transparent !important;
@@ -166,8 +170,9 @@ html[data-cxd-wallpaper="on"] body :is(
 }
 
 html[data-cxd-wallpaper="on"] body :is(
-  [class*="_background_18hic_"],
-  [class*="_fade_18hic_"]
+  [data-thread-scroll-footer] [class*="background-"],
+  [data-thread-scroll-footer] [class*="fade-"],
+  [data-app-action-timeline-scroll] [class*="fade-"]
 ) {
   background-color: transparent !important;
   background-image: none !important;
@@ -175,7 +180,7 @@ html[data-cxd-wallpaper="on"] body :is(
 
 /* Active workspace tab: the pill is a separate background layer, not the tab
    element itself. */
-html[data-cxd-wallpaper="on"] body [class*="_strip_b6c3p_"] [class*="bg-surface-elevated-secondary"] {
+html[data-cxd-wallpaper="on"] body [class*="strip-"] [class*="bg-surface-elevated-secondary"] {
   background-color: var(--cxd-panel-tint, rgba(255, 255, 255, 0.16)) !important;
 }
 
@@ -190,7 +195,7 @@ html[data-cxd-wallpaper="on"] body :is(
   -webkit-backdrop-filter: none !important;
 }
 
-html[data-cxd-wallpaper="on"] body [class*="_PageSurface_"] {
+html[data-cxd-wallpaper="on"] body [class*="PageSurface"] {
   box-shadow: none !important;
 }
 
@@ -211,11 +216,25 @@ html[data-cxd-background] body [data-above-composer-portal] [class*="bg-gradient
   background-image: none !important;
 }
 
+/* The turn-summary pill ("N 个文件已更改") floats above the composer and ships
+   as a solid white card. Give it the same frosted tint as the rest of the shell
+   so it reads as glass instead of a white patch over the artwork. */
+html[data-cxd-wallpaper="on"] body [data-above-composer-portal] [class*="bg-surface-elevated-secondary"] {
+  background-color: var(--cxd-chip-tint, rgba(255, 255, 255, 0.34)) !important;
+  border-color: var(--cxd-composer-border, rgba(255, 255, 255, 0.18)) !important;
+  backdrop-filter: blur(10px) saturate(1.1) !important;
+  -webkit-backdrop-filter: blur(10px) saturate(1.1) !important;
+}
+
+html[data-cxd-wallpaper="on"][data-theme="dark"] body [data-above-composer-portal] [class*="bg-surface-elevated-secondary"] {
+  background-color: rgba(9, 13, 17, 0.52) !important;
+}
+
 /* Codex paints a 40px white-to-transparent scroll fade at the top edge of the
    thread viewport. Over the procedural background it is invisible; over a
    wallpaper it reads as a hard white line spanning the whole window. Drop the
    overlay in wallpaper mode so the artwork stays continuous. */
-html[data-cxd-wallpaper="on"] body [class*="_MainContentTopFade"] {
+html[data-cxd-wallpaper="on"] body [class*="MainContentTopFade"] {
   display: none !important;
 }
 
@@ -224,7 +243,7 @@ html[data-cxd-wallpaper="on"] body [class*="_MainContentTopFade"] {
    bright horizontal seam. Remove only those hairline layers; the transcript
    itself and the footer share the same hashed class and must stay visible. */
 html[data-cxd-wallpaper="on"] body [data-app-shell-header-layout]::after,
-html[data-cxd-wallpaper="on"] body div[class*="_shiftWithTranscript_"].h-px {
+html[data-cxd-wallpaper="on"] body div[class*="shiftWithTranscript"].h-px {
   display: none !important;
   background: transparent !important;
   background-image: none !important;
