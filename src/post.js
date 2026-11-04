@@ -14,7 +14,8 @@ export class PostFX {
 
     this.bloom = new UnrealBloomPass(new THREE.Vector2(width, height), 0.85, 0.72, 0.62);
     this.composer.addPass(this.bloom);
-    this.composer.addPass(new OutputPass());
+    this.output = new OutputPass();
+    this.composer.addPass(this.output);
 
     this.grade = new ShaderPass(gradeShader);
     this.composer.addPass(this.grade);
@@ -41,5 +42,18 @@ export class PostFX {
 
   render(dt) {
     this.composer.render(dt);
+  }
+
+  dispose() {
+    if (this.disposed) return;
+    this.disposed = true;
+    try {
+      this.composer.dispose();
+    } catch {
+      /* ignore */
+    }
+    this.bloom?.dispose?.();
+    this.grade?.dispose?.();
+    this.output?.dispose?.();
   }
 }

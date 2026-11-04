@@ -15,11 +15,16 @@ Before a PR:
 
 ```bash
 npm run build:all
+npm test
 node --check tools/inject.mjs
+node --check tools/restore.mjs
+node --check tools/doctor.mjs
+node --check tools/cleanup-expression.mjs
+node --check tools/start.mjs
 node --check tools/sync-decoders.mjs
 ```
 
-`npm run build:all` must succeed and produce both `dist/` and `dist-embed/codex-dynamic-bg.iife.js`.
+`npm run build:all` must succeed and produce both `dist/` and `dist-embed/codex-dynamic-bg.iife.js`. `npm test` runs the `node:test` suite under `test/`.
 
 ## Code guidelines
 

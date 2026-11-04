@@ -38,6 +38,10 @@ body.cxd-embedded {
   position: fixed;
   inset: 0;
   overflow: hidden;
+  /* `overflow: hidden` still creates a programmatically scrollable box.
+     Chromium can scroll it when focus moves inside the settings panel,
+     which shifts the whole canvas. `clip` never scrolls. */
+  overflow: clip;
   background: #030509;
   user-select: none;
 }
@@ -59,7 +63,10 @@ body.cxd-embedded {
   display: block;
 }
 
-.cxd-root::after {
+/* Procedural scenes keep a subtle vignette. A real wallpaper must stay crisp:
+   the grade shader already applies its own vignette, so stacking a second CSS
+   layer here is what made photos look muddy. */
+.cxd-root:not(.cxd-wallpaper)::after {
   content: '';
   position: absolute;
   inset: 0;
@@ -320,6 +327,37 @@ body.cxd-embedded {
   backdrop-filter: blur(18px);
 }
 
+/* Desktop wallpaper mode: the artwork is the interface. Keep only a whisper
+   of tint for text contrast and drop every blur/shadow layer that hides it. */
+.cxd-root.cxd-wallpaper .mock-side,
+.cxd-root.cxd-wallpaper .mock-main {
+  border-color: rgba(255, 255, 255, 0.065);
+  background: linear-gradient(
+    180deg,
+    rgba(8, 12, 16, var(--cxd-surface-top, 0.08)),
+    rgba(4, 7, 10, var(--cxd-surface-bottom, 0.11))
+  );
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow:
+    0 12px 32px rgba(0, 0, 0, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.035);
+}
+
+.cxd-root.cxd-wallpaper .mock-msg.user,
+.cxd-root.cxd-wallpaper .mock-composer {
+  background-color: rgba(255, 255, 255, 0.045);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.cxd-root.cxd-wallpaper .mock-side,
+.cxd-root.cxd-wallpaper .mock-main,
+.cxd-root.cxd-wallpaper .mock-msg.user,
+.cxd-root.cxd-wallpaper .mock-composer {
+  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.55);
+}
+
 .mock-send {
   width: 32px;
   height: 32px;
@@ -448,6 +486,14 @@ body.cxd-embedded {
   height: 17px;
 }
 
+.cxd-gear:focus-visible,
+.cxd-panel button:focus-visible,
+.cxd-panel input:focus-visible,
+.cxd-panel select:focus-visible {
+  outline: 2px solid rgba(95, 227, 214, 0.72);
+  outline-offset: 2px;
+}
+
 /* ---------- Panel ---------- */
 
 .cxd-panel {
@@ -517,6 +563,7 @@ body.cxd-embedded {
 .cxd-panel-body {
   flex: 1;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 6px 18px 18px;
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
@@ -535,12 +582,145 @@ body.cxd-embedded {
   padding-top: 14px;
 }
 
+/* `hidden` must win over the layout display values used by these blocks. */
+.cxd-section[hidden],
+.cxd-wallpaper-note[hidden] {
+  display: none;
+}
+
 .cxd-section-title {
   font-size: 10.5px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: rgba(233, 243, 246, 0.3);
   margin-bottom: 6px;
+}
+
+/* ---------- Local asset picker ---------- */
+
+.cxd-wallpaper-note {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 7px;
+  padding: 7px 9px;
+  border: 1px solid rgba(95, 227, 214, 0.16);
+  border-radius: 8px;
+  background: rgba(95, 227, 214, 0.055);
+  color: rgba(206, 255, 247, 0.6);
+  font-size: 10.5px;
+  line-height: 1.3;
+}
+
+.cxd-wallpaper-note::before {
+  content: '';
+  flex: 0 0 6px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--cxd-accent);
+  box-shadow: 0 0 9px rgba(95, 227, 214, 0.7);
+}
+
+.cxd-asset-hint {
+  margin: 0 0 8px;
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: rgba(233, 243, 246, 0.4);
+}
+
+.cxd-asset-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.045);
+}
+
+.cxd-asset-meta {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cxd-asset-meta b {
+  font-size: 12px;
+  font-weight: 500;
+  color: rgba(233, 243, 246, 0.78);
+}
+
+.cxd-asset-meta span {
+  max-width: 168px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+  color: rgba(233, 243, 246, 0.34);
+}
+
+.cxd-asset-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.cxd-asset-btn,
+.cxd-asset-clear {
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: rgba(255, 255, 255, 0.025);
+  color: rgba(233, 243, 246, 0.6);
+  font-size: 10.5px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.cxd-asset-btn {
+  padding: 6px 9px;
+}
+
+.cxd-asset-clear {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  font-size: 14px;
+}
+
+.cxd-asset-btn:hover,
+.cxd-asset-clear:hover {
+  color: #fff;
+  border-color: rgba(95, 227, 214, 0.35);
+  background: rgba(95, 227, 214, 0.08);
+}
+
+.cxd-asset-clear:disabled {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.cxd-dropzone {
+  margin-top: 8px;
+  padding: 10px 8px;
+  border: 1px dashed rgba(95, 227, 214, 0.22);
+  border-radius: 8px;
+  text-align: center;
+  font-size: 10.5px;
+  letter-spacing: 0.03em;
+  color: rgba(159, 250, 236, 0.48);
+  transition: border-color 0.18s ease, background 0.18s ease, color 0.18s ease;
+}
+
+.cxd-dropzone.over {
+  border-color: rgba(95, 227, 214, 0.7);
+  background: rgba(95, 227, 214, 0.08);
+  color: rgba(216, 255, 250, 0.9);
+}
+
+.cxd-panel-compact .cxd-asset-meta span {
+  max-width: 142px;
 }
 
 .cxd-row {
@@ -711,6 +891,374 @@ body.cxd-embedded {
   color: rgba(233, 243, 246, 0.3);
 }
 
+/* ---------- Embedded UI host ---------- */
+
+/* The injected background layer is z-index:-1 and pointer-events:none, so
+   settings controls mount in a separate fixed host above Codex. */
+.cxd-ui-layer {
+  position: fixed;
+  inset: 0;
+  overflow: clip;
+  z-index: 2147483000;
+  pointer-events: none;
+}
+
+.cxd-ui-layer .cxd-gear {
+  pointer-events: auto;
+}
+
+.cxd-ui-layer .cxd-panel[data-open='true'] {
+  pointer-events: auto;
+}
+
+.cxd-gear-embed {
+  right: 18px;
+  bottom: 18px;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  opacity: 0.45;
+  background: rgba(8, 12, 16, 0.5);
+  transition: opacity 0.2s ease, background 0.2s ease, transform 0.2s ease;
+}
+
+.cxd-gear-embed:hover,
+.cxd-gear-embed:focus-visible {
+  opacity: 1;
+}
+
+.cxd-gear-embed svg {
+  width: 15px;
+  height: 15px;
+}
+
+.cxd-gear.on {
+  color: #c9fff8;
+  border-color: rgba(95, 227, 214, 0.4);
+  background: rgba(12, 26, 29, 0.72);
+  box-shadow: 0 0 20px rgba(95, 227, 214, 0.15);
+}
+
+.cxd-panel-compact {
+  top: 48px;
+  right: 12px;
+  bottom: 12px;
+  width: 292px;
+}
+
+.cxd-panel-compact .cxd-panel-head {
+  padding: 14px 14px 11px;
+}
+
+.cxd-panel-compact .cxd-panel-body {
+  padding: 2px 14px 14px;
+}
+
+.cxd-panel-compact .cxd-panel-foot {
+  padding: 10px 12px;
+  gap: 6px;
+}
+
+.cxd-panel-compact .cxd-text-btn {
+  padding: 5px 7px;
+  font-size: 11px;
+}
+
+/* ---------- Theme + readability controls ---------- */
+
+.cxd-theme-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+  padding: 2px 0 4px;
+}
+
+.cxd-theme-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 7px 6px;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.03);
+  color: rgba(233, 243, 246, 0.52);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.18s ease, background 0.18s ease, color 0.18s ease;
+}
+
+.cxd-theme-chip i {
+  flex: 0 0 11px;
+  width: 11px;
+  height: 11px;
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+}
+
+.cxd-theme-chip span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cxd-theme-chip:hover {
+  color: rgba(233, 243, 246, 0.82);
+  border-color: rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.cxd-theme-chip.on {
+  color: #d9fff9;
+  border-color: rgba(95, 227, 214, 0.42);
+  background: rgba(95, 227, 214, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(95, 227, 214, 0.12);
+}
+
+.cxd-seg-wide {
+  width: 100%;
+}
+
+.cxd-seg-wide button {
+  flex: 1 1 0;
+}
+
+.cxd-foot-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.cxd-foot-note {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding-right: 6px;
+  text-align: right;
+  font-size: 10px;
+  color: rgba(159, 250, 236, 0.72);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---------- Control groups + workshop ---------- */
+
+.cxd-group {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.cxd-group[hidden],
+[data-when][hidden] {
+  display: none !important;
+}
+
+.cxd-group-title {
+  margin-bottom: 2px;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(233, 243, 246, 0.3);
+}
+
+.cxd-workshop {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.cxd-workshop-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.cxd-workshop-title {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: rgba(233, 243, 246, 0.72);
+}
+
+.cxd-workshop-head .cxd-asset-btn {
+  flex: 0 0 auto;
+  padding: 5px 8px;
+}
+
+.cxd-workshop-tools {
+  display: flex;
+  gap: 6px;
+  margin: 0 0 8px;
+}
+
+.cxd-workshop-tools input,
+.cxd-workshop-tools select {
+  min-width: 0;
+  height: 25px;
+  padding: 0 7px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.035);
+  color: rgba(233, 243, 246, 0.78);
+  font: inherit;
+  font-size: 10.5px;
+  outline: none;
+}
+
+.cxd-workshop-tools input {
+  flex: 1 1 auto;
+}
+
+.cxd-workshop-tools select {
+  flex: 0 0 84px;
+}
+
+.cxd-workshop-tools input:focus,
+.cxd-workshop-tools select:focus {
+  border-color: rgba(95, 227, 214, 0.42);
+  background: rgba(95, 227, 214, 0.06);
+}
+
+.cxd-workshop-tools input:disabled,
+.cxd-workshop-tools select:disabled {
+  opacity: 0.4;
+}
+
+.cxd-workshop-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  max-height: 318px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+}
+
+.cxd-workshop-list::-webkit-scrollbar {
+  width: 5px;
+}
+
+.cxd-workshop-list::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: 3px;
+}
+
+.cxd-ws-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.055);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.022);
+}
+
+.cxd-ws-card.is-active {
+  border-color: rgba(95, 227, 214, 0.34);
+  background: rgba(95, 227, 214, 0.07);
+}
+
+.cxd-ws-thumb {
+  position: relative;
+  flex: 0 0 52px;
+  width: 52px;
+  height: 52px;
+  overflow: hidden;
+  border-radius: 6px;
+  background:
+    linear-gradient(135deg, rgba(95, 227, 214, 0.12), rgba(255, 255, 255, 0.02)),
+    rgba(0, 0, 0, 0.28);
+}
+
+.cxd-ws-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.cxd-ws-type {
+  position: absolute;
+  left: 3px;
+  bottom: 3px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  background: rgba(3, 9, 13, 0.72);
+  color: rgba(206, 255, 247, 0.75);
+  font-size: 8.5px;
+  line-height: 1;
+  backdrop-filter: blur(4px);
+}
+
+.cxd-ws-meta {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.cxd-ws-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  color: rgba(233, 243, 246, 0.8);
+}
+
+.cxd-ws-sub {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 9.5px;
+  color: rgba(233, 243, 246, 0.34);
+  white-space: nowrap;
+}
+
+.cxd-ws-badge {
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(233, 243, 246, 0.55);
+  font-size: 8.5px;
+  font-weight: 600;
+}
+
+.cxd-ws-badge.on {
+  background: rgba(95, 227, 214, 0.18);
+  color: rgba(199, 255, 248, 0.9);
+}
+
+.cxd-ws-use {
+  flex: 0 0 auto;
+  padding: 5px 7px;
+  font-size: 10px;
+}
+
+.cxd-ws-use:disabled {
+  opacity: 0.38;
+}
+
+.cxd-ws-empty {
+  padding: 14px 8px;
+  border: 1px dashed rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  text-align: center;
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: rgba(233, 243, 246, 0.36);
+}
+
 /* ---------- Loader / ripple ---------- */
 
 .cxd-loader {
@@ -802,6 +1350,10 @@ body.cxd-embedded {
 
   .cxd-panel {
     width: min(322px, calc(100vw - 28px));
+  }
+
+  .cxd-panel-compact {
+    width: min(292px, calc(100vw - 28px));
   }
 }
 

@@ -1,11 +1,24 @@
 import * as THREE from 'three';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { BackgroundLayer } from './scene/background.js';
-import { ModelLayer } from './scene/model.js';
-import { Particles } from './scene/particles.js';
-import { PostFX } from './post.js';
-import { QUALITY, clamp } from './config.js';
+import { QUALITY, clamp, normalizeQuality } from './config.js';
+import { getTheme } from './presets.js';
 
+const IDLE_PAUSE_MS = 1400;
+
+/**
+ * WebGL background engine.
+ *
+ * Two modes share one renderer:
+ *
+ *   procedural — the generated look: environment map, lights, glow, particles,
+ *                optional GLB model, post-processing.
+ *   artwork    — a photo / video / Wallpaper Engine scene owns the frame. No
+ *                environment map, no lights, no particles, no composer: a
+ *                single fullscreen quad and one `renderer.render()`.
+ *
+ * Heavy modules (GLTFLoader, postprocessing, RoomEnvironment) are imported
+ * dynamically so a wallpaper-only session never pays for them.
+ */
 export class BackgroundEngine {
   constructor(container, config) {
     this.container = container;
@@ -13,22 +26,32 @@ export class BackgroundEngine {
     this.time = 0;
     this.mouse = new THREE.Vector2();
     this.targetMouse = new THREE.Vector2();
-    this.visible = true;
-    this.running = false;
+    this.visible = !document.hidden;
     this.fps = 0;
     this._fpsAcc = 0;
     this._fpsFrames = 0;
-    this._last = performance.now();
+    this._last = 0;
+    this._lastRender = 0;
+    this._lastPointer = -1e9;
+    this._raf = 0;
+    this._timer = 0;
+    this._running = false;
+    this._needsRepaint = true;
+    this.mode = 'procedural';
+    this.artworkKind = 'none';
+    this.modelEnabled = true;
+    this.disposed = false;
 
     this.canvas = document.createElement('canvas');
     this.canvas.className = 'cxd-canvas';
     container.appendChild(this.canvas);
 
+    this.quality = QUALITY[normalizeQuality(this.config.quality)];
     this.renderer = new THREE.WebGLRenderer({
       canvas: this.canvas,
-      antialias: true,
+      antialias: Boolean(this.quality.antialias),
       alpha: false,
-      powerPreference: 'high-performance',
+      powerPreference: 'default',
       preserveDrawingBuffer: false,
     });
     this.renderer.setClearColor(0x030509, 1);
@@ -39,28 +62,32 @@ export class BackgroundEngine {
     this.camera = new THREE.PerspectiveCamera(36, 16 / 9, 0.1, 120);
     this.camera.position.set(0, 0, 10);
 
-    this.setupEnvironment();
-    this.setupLights();
-
     this.background = new BackgroundLayer(this.scene, this.renderer);
-    this.glow = this.createGlow();
-    this.model = new ModelLayer(this.scene, this.renderer);
-    this.particles = new Particles(this.scene);
 
-    this.post = new PostFX(
-      this.renderer,
-      this.scene,
-      this.camera,
-      container.clientWidth || 1280,
-      container.clientHeight || 720,
-    );
+    // Lazily created.
+    this.glow = null;
+    this.model = null;
+    this.particles = null;
+    this.post = null;
+    this.lights = null;
+    this.envRT = null;
+    this.pmrem = null;
+    this._proceduralReady = null;
 
-    this.quality = QUALITY[this.config.quality] || QUALITY.high;
     this.applyQuality();
 
     this._onPointerMove = this.onPointerMove.bind(this);
     this._onVisibility = () => {
-      this.visible = !document.hidden;
+      const hidden = document.hidden;
+      this.visible = !hidden;
+      if (hidden) {
+        this._cancel();
+      } else {
+        this._last = 0;
+        this._lastRender = 0;
+        this._needsRepaint = true;
+        this.wake();
+      }
     };
     window.addEventListener('pointermove', this._onPointerMove, { passive: true });
     document.addEventListener('visibilitychange', this._onVisibility);
@@ -70,33 +97,115 @@ export class BackgroundEngine {
     this.resize();
   }
 
-  setupEnvironment() {
+  /* ---------------------------------------------------------------- */
+  /* Lazy layers                                                      */
+  /* ---------------------------------------------------------------- */
+
+  ensureProcedural() {
+    if (this.mode === 'artwork') return Promise.resolve();
+    if (this._proceduralReady) return this._proceduralReady;
+    this._proceduralReady = (async () => {
+      await this.ensureEnvironment();
+      this.ensureLights();
+      this.ensureGlow();
+      await Promise.all([this.ensureParticles(), this.ensurePost()]);
+      this.applyQuality();
+      this._needsRepaint = true;
+      this.wake();
+    })().catch((error) => {
+      console.warn('[codex-bg] procedural layers unavailable', error);
+    });
+    return this._proceduralReady;
+  }
+
+  async ensureEnvironment() {
+    if (this.envRT || this.mode === 'artwork') return;
+    const [{ RoomEnvironment }] = await Promise.all([
+      import('three/addons/environments/RoomEnvironment.js'),
+    ]);
+    if (this.disposed || this.mode === 'artwork') return;
     this.pmrem = new THREE.PMREMGenerator(this.renderer);
     this.pmrem.compileEquirectangularShader();
     const envScene = new RoomEnvironment();
     this.envRT = this.pmrem.fromScene(envScene, 0.04);
     this.scene.environment = this.envRT.texture;
     this.scene.environmentIntensity = 0.55;
+    envScene.dispose?.();
   }
 
-  setupLights() {
-    const ambient = new THREE.AmbientLight(0x88aabb, 0.5);
-    this.scene.add(ambient);
+  releaseEnvironment() {
+    this.scene.environment = null;
+    try {
+      this.envRT?.dispose?.();
+      this.pmrem?.dispose?.();
+    } catch {
+      /* ignore */
+    }
+    this.envRT = null;
+    this.pmrem = null;
+  }
 
+  ensureLights() {
+    if (this.lights) return this.lights;
+    const ambient = new THREE.AmbientLight(0x88aabb, 0.5);
     const key = new THREE.DirectionalLight(0xffe1bd, 2.2);
     key.position.set(5, 7, 6);
-    this.scene.add(key);
-
     const rimA = new THREE.PointLight(0x3fe0d4, 120, 34, 2);
     rimA.position.set(-6, 2.5, 4);
-    this.scene.add(rimA);
-
     const rimB = new THREE.PointLight(0x8b6bff, 90, 34, 2);
     rimB.position.set(6, -2.5, 3);
-    this.scene.add(rimB);
-
-    this.lights = { key, rimA, rimB };
+    this.scene.add(ambient, key, rimA, rimB);
+    this.lights = { ambient, key, rimA, rimB };
+    return this.lights;
   }
+
+  ensureGlow() {
+    if (this.glow) return this.glow;
+    this.glow = this.createGlow();
+    this.glow.visible = this.mode !== 'artwork' && this.modelEnabled;
+    return this.glow;
+  }
+
+  async ensureParticles() {
+    if (this.particles) return this.particles;
+    if (this.mode === 'artwork' || !this.quality.particles) return null;
+    const { Particles } = await import('./scene/particles.js');
+    if (this.disposed || this.mode === 'artwork' || !this.quality.particles) return null;
+    this.particles = new Particles(this.scene);
+    this.particles.setDensity(this.quality.particleScale);
+    this.applyTheme(this.config.theme);
+    return this.particles;
+  }
+
+  async ensurePost() {
+    if (this.post) return this.post;
+    if (this.mode === 'artwork' || !this.quality.bloom) return null;
+    const { PostFX } = await import('./post.js');
+    if (this.disposed || this.mode === 'artwork' || !this.quality.bloom) return null;
+    this.post = new PostFX(
+      this.renderer,
+      this.scene,
+      this.camera,
+      this.container.clientWidth || 1280,
+      this.container.clientHeight || 720,
+    );
+    this.post.setBloom(this.config.bloom);
+    this.post.setSize(this.width || 1280, this.height || 720);
+    return this.post;
+  }
+
+  async ensureModel() {
+    if (this.model) return this.model;
+    const { ModelLayer } = await import('./scene/model.js');
+    if (this.disposed) return null;
+    this.model = new ModelLayer(this.scene, this.renderer);
+    if (this.model.root) this.model.root.visible = this.modelEnabled;
+    return this.model;
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Procedural look                                                  */
+  /* ---------------------------------------------------------------- */
 
   createGlow() {
     const uniforms = {
@@ -146,6 +255,10 @@ export class BackgroundEngine {
     return mesh;
   }
 
+  /* ---------------------------------------------------------------- */
+  /* Background sources                                               */
+  /* ---------------------------------------------------------------- */
+
   async setBackgroundImage(img) {
     this.disposeBackgroundTexture();
     const texture = new THREE.Texture(img);
@@ -153,6 +266,9 @@ export class BackgroundEngine {
     this.background.setTexture(texture, img.width / img.height);
     this.backgroundTexture = texture;
     this.backgroundVideo = null;
+    this.artworkKind = 'image';
+    this._needsRepaint = true;
+    this.wake();
   }
 
   async setBackgroundVideo(video) {
@@ -162,12 +278,26 @@ export class BackgroundEngine {
     this.background.setTexture(texture, video.videoWidth / video.videoHeight);
     this.backgroundTexture = texture;
     this.backgroundVideo = video;
+    this.artworkKind = 'video';
+    this._needsRepaint = true;
+    this.wake();
   }
 
   /** Replay a Wallpaper Engine scene wallpaper (effect chain + parallax). */
   setSceneWallpaper(data) {
     this.disposeBackgroundTexture();
     this.background.setSceneWallpaper(data);
+    this.background.setFit(this.config.fit);
+    this.artworkKind = 'scene';
+    this._needsRepaint = true;
+    this.wake();
+  }
+
+  setFit(fit) {
+    this.config.fit = fit;
+    this.background.setFit(fit);
+    this._needsRepaint = true;
+    this.wake();
   }
 
   disposeBackgroundTexture() {
@@ -188,39 +318,147 @@ export class BackgroundEngine {
     if (this.background.mode === 'scene') {
       this.background.disposeSceneMaterial();
     }
+    this.artworkKind = 'none';
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Mode switching                                                   */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * Artwork mode tears the generated layers down instead of just hiding them:
+   * a 2048px PMREM cubemap plus a bloom chain is the difference between a
+   * smooth Codex and a stuttering one on integrated graphics.
+   */
+  setArtworkMode(enabled) {
+    const next = Boolean(enabled);
+    if (this._artworkKnown && next === (this.mode === 'artwork')) return;
+    this._artworkKnown = true;
+    this.mode = next ? 'artwork' : 'procedural';
+
+    if (next) {
+      this.releaseEnvironment();
+      if (this.post) {
+        try {
+          this.post.dispose();
+        } catch {
+          /* ignore */
+        }
+        this.post = null;
+      }
+      this.particles?.setDensity(0);
+      if (this.model?.root) this.model.root.visible = false;
+      if (this.glow) this.glow.visible = false;
+      this.scene.background = null;
+    } else {
+      if (this.glow) this.glow.visible = this.modelEnabled;
+      this.ensureProcedural();
+    }
+    this._needsRepaint = true;
+    this.wake();
   }
 
   async loadModel(url, onProgress) {
-    await this.model.load(url, onProgress);
+    const model = await this.ensureModel();
+    if (!model) throw new Error('engine disposed');
+    await model.load(url, onProgress);
+    this.modelEnabled = true;
+    if (model.root) model.root.visible = true;
+    this.wake();
   }
+
+  clearModel() {
+    this.model?.clear?.();
+    this.wake();
+  }
+
+  /**
+   * A photo/video/scene wallpaper owns the frame. Hide the procedural crystal
+   * (and its glow) so it does not sit on top of the artwork. Loading an
+   * explicit GLB shows the model again.
+   */
+  setModelEnabled(enabled) {
+    this.modelEnabled = Boolean(enabled);
+    if (this.model?.root) this.model.root.visible = this.modelEnabled;
+    if (this.glow) this.glow.visible = this.modelEnabled && this.mode !== 'artwork';
+    this.wake();
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Config                                                           */
+  /* ---------------------------------------------------------------- */
 
   onPointerMove(event) {
     const rect = this.container.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
     this.targetMouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
     this.targetMouse.y = ((event.clientY - rect.top) / rect.height) * 2 - 1;
+    this._lastPointer = performance.now();
+    this.wake();
   }
 
   setConfig(config) {
-    const qualityChanged = config.quality !== this.config.quality;
-    const densityChanged = config.quality !== this.config.quality;
+    const qualityChanged = normalizeQuality(config.quality) !== normalizeQuality(this.config.quality);
     this.config = { ...config };
-    if (qualityChanged) {
-      this.quality = QUALITY[config.quality] || QUALITY.high;
-      this.applyQuality();
+    if (qualityChanged) this.applyQuality();
+    if (this.post) this.post.setBloom(this.quality.bloom ? config.bloom : 0);
+    if (this.glow) {
+      this.glow.material.uniforms.uStrength.value = 0.55 + config.bloom * 0.55;
+      this.glow.position.x = config.modelX * 2.2;
     }
-    if (densityChanged) this.particles.setDensity(this.quality.particleScale);
-    this.post.setBloom(config.bloom * (this.quality.bloom ? 1 : 0));
-    this.glow.material.uniforms.uStrength.value = 0.55 + config.bloom * 0.55;
-    this.glow.position.x = config.modelX * 2.2;
+    if (this.background.mode === 'scene') this.background.setFit(config.fit);
+    this.applyTheme(config.theme);
+    this._needsRepaint = true;
+    this.wake();
+  }
+
+  applyTheme(id) {
+    const { palette } = getTheme(id);
+    if (this.glow) {
+      this.glow.material.uniforms.uColorA.value.set(palette.glowA);
+      this.glow.material.uniforms.uColorB.value.set(palette.glowB);
+    }
+    if (this.particles?.material?.uniforms) {
+      this.particles.material.uniforms.uColorA.value.set(palette.particleA);
+      this.particles.material.uniforms.uColorB.value.set(palette.particleB);
+    }
+    if (this.lights) {
+      this.lights.rimA.color.set(palette.rimA);
+      this.lights.rimB.color.set(palette.rimB);
+    }
   }
 
   applyQuality() {
-    const dpr = Math.min(window.devicePixelRatio || 1, this.quality.dpr);
+    const tier = QUALITY[normalizeQuality(this.config.quality)];
+    this.quality = tier;
+    const dpr = Math.min(window.devicePixelRatio || 1, tier.dpr);
     this.renderer.setPixelRatio(dpr);
     this.pixelRatio = dpr;
-    this.particles.setDensity(this.quality.particleScale);
-    this.post.setBloom(this.config.bloom * (this.quality.bloom ? 1 : 0));
+    if (this.particles) {
+      this.particles.setDensity(tier.particles ? tier.particleScale : 0);
+    }
+    if (this.mode === 'procedural') {
+      // A session may boot on the saver tier and be raised to high later.
+      // Lazily create whatever the new tier needs instead of leaving the
+      // composer/particles permanently missing.
+      if (tier.particles && !this.particles) {
+        this.ensureParticles();
+      }
+      if (tier.bloom) {
+        this.ensurePost();
+      } else if (this.post) {
+        try {
+          this.post.dispose();
+        } catch {
+          /* ignore */
+        }
+        this.post = null;
+      }
+    }
+    if (this.post) this.post.setBloom(tier.bloom ? this.config.bloom : 0);
+    this._needsRepaint = true;
     this.resize();
+    this.wake();
   }
 
   resize() {
@@ -229,31 +467,92 @@ export class BackgroundEngine {
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(width, height, false);
-    this.post.setSize(width, height);
+    this.post?.setSize(width, height);
     this.background.resize(this.camera, width, height);
     this.width = width;
     this.height = height;
+    this._needsRepaint = true;
+    this.wake();
   }
+
+  /* ---------------------------------------------------------------- */
+  /* Loop                                                             */
+  /* ---------------------------------------------------------------- */
 
   start() {
-    if (this.running) return;
-    this.running = true;
-    const loop = () => {
-      if (!this.running) return;
-      this._raf = requestAnimationFrame(loop);
-      this.frame();
-    };
-    this._raf = requestAnimationFrame(loop);
+    if (this._running) return;
+    this._running = true;
+    this._last = 0;
+    this._lastRender = 0;
+    this._schedule();
   }
 
-  frame() {
+  _schedule() {
+    if (!this._running || this._raf || this._timer || this.disposed) return;
+    const interval = 1000 / (this.quality.fps || 60);
+    if (interval > 20) {
+      const since = this._lastRender ? performance.now() - this._lastRender : interval;
+      const wait = Math.max(4, interval - since);
+      this._timer = setTimeout(() => {
+        this._timer = 0;
+        this._tick();
+      }, wait);
+    } else {
+      this._raf = requestAnimationFrame(() => {
+        this._raf = 0;
+        this._tick();
+      });
+    }
+  }
+
+  _cancel() {
+    if (this._raf) cancelAnimationFrame(this._raf);
+    if (this._timer) clearTimeout(this._timer);
+    this._raf = 0;
+    this._timer = 0;
+  }
+
+  /** Redraw now, then go back to sleep when the frame is static again. */
+  wake() {
+    this._needsRepaint = true;
+    if (this._running) this._schedule();
+  }
+
+  _tick() {
+    if (this.disposed || !this._running) return;
+    if (document.hidden) return;
+
     const now = performance.now();
-    const rawDt = (now - this._last) / 1000;
-    this._last = now;
+    const interval = 1000 / (this.quality.fps || 60);
+    if (this._lastRender && now - this._lastRender < interval - 1.5) {
+      this._schedule();
+      return;
+    }
+    const rawDt = this._lastRender ? (now - this._lastRender) / 1000 : interval / 1000;
+    this._lastRender = now;
     const dt = clamp(rawDt, 0.001, 0.05);
 
-    if (!this.visible) return;
+    this._render(dt);
+    this._needsRepaint = false;
+    this._sampleFps(rawDt);
 
+    if (this._shouldContinue(now)) this._schedule();
+  }
+
+  /**
+   * A static image only changes when the pointer moves or the layout changes,
+   * so there is no reason to burn a frame every 16ms. Video and scene
+   * wallpapers keep animating and always continue.
+   */
+  _shouldContinue(now) {
+    if (document.hidden) return false;
+    if (!this._needsRepaint && this.mode === 'artwork' && this.artworkKind === 'image' && this.config.idlePause) {
+      return now - this._lastPointer < IDLE_PAUSE_MS;
+    }
+    return true;
+  }
+
+  _render(dt) {
     this.time += dt * Math.max(0.05, this.config.motion);
     this.mouse.lerp(this.targetMouse, 0.055);
 
@@ -262,38 +561,84 @@ export class BackgroundEngine {
     this.camera.lookAt(0, 0, 0);
 
     this.background.update(this.time, this.mouse, this.config);
-    this.model.update(dt, this.time, this.mouse, this.config);
-    this.particles.update(this.time, this.pixelRatio, this.config);
 
-    this.glow.material.uniforms.uTime.value = this.time;
-    this.glow.position.y = this.config.modelY * 1.4;
+    if (this.mode === 'procedural') {
+      if (this.model && this.modelEnabled) {
+        this.model.update(dt, this.time, this.mouse, this.config);
+      }
+      if (this.particles && this.quality.particles) {
+        this.particles.update(this.time, this.pixelRatio, this.config);
+      }
+      if (this.glow) {
+        this.glow.material.uniforms.uTime.value = this.time;
+        this.glow.position.y = this.config.modelY * 1.4;
+      }
+      if (this.lights) {
+        this.lights.rimA.position.x = -6 + Math.sin(this.time * 0.35) * 1.2;
+        this.lights.rimB.position.x = 6 + Math.cos(this.time * 0.28) * 1.2;
+      }
+    }
 
-    this.lights.rimA.position.x = -6 + Math.sin(this.time * 0.35) * 1.2;
-    this.lights.rimB.position.x = 6 + Math.cos(this.time * 0.28) * 1.2;
-
-    this.post.update(this.time, this.config);
-    this.post.render(dt);
-
-    this._fpsAcc += rawDt;
-    this._fpsFrames += 1;
-    if (this._fpsAcc >= 0.5) {
-      this.fps = Math.round(this._fpsFrames / this._fpsAcc);
-      this._fpsAcc = 0;
-      this._fpsFrames = 0;
-      this.onFps && this.onFps(this.fps);
+    if (this.post) {
+      this.post.update(this.time, this.config);
+      this.post.render(dt);
+    } else {
+      this.renderer.render(this.scene, this.camera);
     }
   }
 
+  _sampleFps(rawDt) {
+    this._fpsAcc += rawDt;
+    this._fpsFrames += 1;
+    if (this._fpsAcc < 0.5) return;
+    this.fps = Math.round(this._fpsFrames / this._fpsAcc);
+    this._fpsAcc = 0;
+    this._fpsFrames = 0;
+    this.onFps && this.onFps(this.fps);
+  }
+
+  stats() {
+    return {
+      fps: this.fps,
+      tier: normalizeQuality(this.config.quality),
+      dpr: this.pixelRatio || 1,
+      mode: this.mode,
+      artwork: this.artworkKind,
+      antialias: Boolean(this.quality.antialias),
+      bloom: Boolean(this.post),
+      particles: Boolean(this.particles && this.quality.particles),
+      model: Boolean(this.model),
+      drawCalls: this.renderer.info?.render?.calls ?? 0,
+    };
+  }
+
   dispose() {
-    this.running = false;
-    cancelAnimationFrame(this._raf);
+    if (this.disposed) return;
+    this.disposed = true;
+    this._running = false;
+    this._cancel();
     window.removeEventListener('pointermove', this._onPointerMove);
     document.removeEventListener('visibilitychange', this._onVisibility);
     this._resizeObserver.disconnect();
     this.disposeBackgroundTexture();
+    this.model?.dispose?.();
+    this.particles?.dispose?.();
+    this.post?.dispose?.();
+    if (this.glow) {
+      this.glow.geometry?.dispose();
+      this.glow.material?.dispose();
+      this.glow.parent?.remove(this.glow);
+      this.glow = null;
+    }
+    if (this.lights) {
+      Object.values(this.lights).forEach((light) => this.scene.remove(light));
+      this.lights = null;
+    }
     this.background.dispose();
+    this.releaseEnvironment();
     this.renderer.dispose();
-    this.envRT.dispose();
-    this.pmrem.dispose();
+    this.renderer.forceContextLoss?.();
+    this.scene.clear();
+    this.canvas.remove();
   }
 }

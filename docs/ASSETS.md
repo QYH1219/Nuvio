@@ -1,5 +1,51 @@
 # Assets
 
+There are two ways to install assets:
+
+| Path | Best for | Storage |
+| --- | --- | --- |
+| Settings panel → My assets | Most users; no terminal | Browser IndexedDB |
+| `public/assets` + `npm run use` / `npm run wallpaper` | Reproducible local setup, `.gltf`, Wallpaper Engine scenes | Repository working tree |
+
+## In-app asset library
+
+Press `G` in the preview or injected Codex page, open **My assets**, and choose or drop a file.
+
+| Slot | Accepts | Limit |
+| --- | --- | --- |
+| `background` | PNG, JPG/JPEG, WebP, AVIF, GIF, MP4, WebM, MOV, M4V | 192 MiB |
+| `model` | single-file `.glb` | 128 MiB |
+
+Behavior:
+
+- Files are stored as Blobs in IndexedDB database `codex-dynamic-bg`, object store
+  `assets`, keyed by slot.
+- Nothing is uploaded. The page reads the Blob through a temporary object URL.
+- Before a file is written to IndexedDB, it is fully decoded: images through an
+  `<img>` element, videos through `loadedmetadata` / `seeked`, models through
+  `GLTFLoader`. A corrupt or unsupported file leaves the previous asset and the
+  current frame untouched.
+- If applying a validated file fails during the final render, the IndexedDB
+  record and the visible asset are rolled back.
+- User assets take priority over `public/assets`. Clearing a slot deletes the
+  IndexedDB record, then restores the disk asset when present, otherwise falls
+  back to the procedural background or placeholder crystal.
+- The model slot accepts only single-file `.glb`. `.gltf` usually depends on
+  sibling `.bin`, texture, and KTX2 files; a single-file picker cannot import
+  those reliably. Use the disk workflow for `.gltf`.
+- The preview site and the injected Codex renderer are different origins. Their
+  IndexedDB libraries are independent; importing in one does not change the
+  other.
+
+Relevant source: `src/library.js` (storage/validation), `src/mount.js` (atomic
+apply and rollback), `src/scene/model.js` (GLB decode and loader cleanup).
+
+## Disk assets
+
+The rest of this document covers the `public/assets/` workflow, which is still
+the right choice for committed demos, scripts, `.gltf`, and Wallpaper Engine
+scene imports.
+
 ## One-shot installer
 
 `tools/use.mjs` copies an asset into the exact filename the runtime probes and
@@ -129,6 +175,9 @@ Supported names:
 public/assets/model.glb
 public/assets/model.gltf
 ```
+
+The settings-panel library accepts only single-file `.glb`. The disk probe still
+supports `.gltf` for project assets.
 
 For `.gltf`, keep the `.bin`, textures, and any `.ktx2` files next to it and update relative URIs if needed. GLB is strongly preferred.
 

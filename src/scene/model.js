@@ -43,6 +43,90 @@ function rimMaterial(color, strength = 0.9) {
   });
 }
 
+function createGLTFLoader(renderer) {
+  const loader = new GLTFLoader();
+
+  // Tripo exports sometimes use Draco, Meshopt, or KTX2. Keep the decoders
+  // local so the built bundle works offline and inside Codex.
+  const draco = new DRACOLoader();
+  draco.setDecoderPath(assetUrl('vendor/draco/'));
+  loader.setDRACOLoader(draco);
+  loader.setMeshoptDecoder(MeshoptDecoder);
+
+  let ktx2 = null;
+  if (renderer) {
+    ktx2 = new KTX2Loader();
+    ktx2.setTranscoderPath(assetUrl('vendor/basis/'));
+    ktx2.detectSupport(renderer);
+    loader.setKTX2Loader(ktx2);
+  }
+
+  // Keep the helper loaders reachable so they can release their workers after
+  // parsing. A fresh loader per import avoids "multiple active loaders" warnings.
+  loader.userData = { draco, ktx2 };
+  return loader;
+}
+
+function disposeLoader(loader) {
+  try {
+    loader?.userData?.draco?.dispose();
+  } catch {
+    /* ignore */
+  }
+  try {
+    loader?.userData?.ktx2?.dispose();
+  } catch {
+    /* ignore */
+  }
+}
+
+function disposeObject(root) {
+  if (!root) return;
+  const geometries = new Set();
+  const materials = new Set();
+  const textures = new Set();
+
+  root.traverse((node) => {
+    if (node.geometry) geometries.add(node.geometry);
+    const list = Array.isArray(node.material) ? node.material : node.material ? [node.material] : [];
+    list.forEach((material) => {
+      materials.add(material);
+      Object.values(material).forEach((value) => {
+        if (value && value.isTexture) textures.add(value);
+      });
+    });
+  });
+
+  geometries.forEach((geometry) => geometry.dispose());
+  textures.forEach((texture) => texture.dispose());
+  materials.forEach((material) => material.dispose());
+}
+
+/**
+ * Validate a GLB without replacing the currently displayed model. This is used
+ * before a picked file is written to IndexedDB so a corrupt file cannot evict
+ * the user's last working asset.
+ */
+export async function validateModelUrl(url, renderer) {
+  const loader = createGLTFLoader(renderer);
+  let scene = null;
+  try {
+    const gltf = await loader.loadAsync(url);
+    scene = gltf?.scene || null;
+    if (!scene) throw new Error('模型没有场景节点');
+
+    let meshCount = 0;
+    scene.traverse((node) => {
+      if (node.isMesh) meshCount += 1;
+    });
+    if (!meshCount) throw new Error('模型中没有可渲染的 Mesh');
+    return true;
+  } finally {
+    disposeObject(scene);
+    disposeLoader(loader);
+  }
+}
+
 export class ModelLayer {
   constructor(scene, renderer) {
     this.renderer = renderer;
@@ -55,7 +139,9 @@ export class ModelLayer {
     this.enter = 0;
     this.mixer = null;
     this.loaded = false;
+    this.loadedObject = null;
     this.source = 'placeholder';
+    this.disposed = false;
 
     this.buildPlaceholder();
   }
@@ -119,28 +205,23 @@ export class ModelLayer {
   }
 
   async load(url, onProgress) {
-    this.loader = new GLTFLoader();
+    const loader = createGLTFLoader(this.renderer);
+    this.loader = loader;
 
-    // Tripo exports sometimes use Draco, Meshopt, or KTX2. Keep the decoders
-    // local so the built bundle works offline and inside Codex.
-    const draco = new DRACOLoader();
-    draco.setDecoderPath(assetUrl('vendor/draco/'));
-    this.loader.setDRACOLoader(draco);
-    this.loader.setMeshoptDecoder(MeshoptDecoder);
-
-    if (this.renderer) {
-      const ktx2 = new KTX2Loader();
-      ktx2.setTranscoderPath(assetUrl('vendor/basis/'));
-      ktx2.detectSupport(this.renderer);
-      this.loader.setKTX2Loader(ktx2);
+    let gltf;
+    try {
+      gltf = await loader.loadAsync(url, (event) => {
+        if (onProgress && event.total) onProgress(event.loaded / event.total);
+      });
+    } finally {
+      disposeLoader(loader);
+      if (this.loader === loader) this.loader = null;
     }
 
-    const gltf = await this.loader.loadAsync(
-      url,
-      (event) => {
-        if (onProgress && event.total) onProgress(event.loaded / event.total);
-      },
-    );
+    if (this.disposed) {
+      disposeObject(gltf?.scene);
+      return;
+    }
 
     const object = gltf.scene;
     object.updateMatrixWorld(true);
@@ -182,22 +263,71 @@ export class ModelLayer {
       gltf.animations.forEach((clip) => this.mixer.clipAction(clip).play());
     }
 
+    // Keep the placeholder alive but hidden so clearing a user model can
+    // restore the procedural crystal without rebuilding the scene.
+    this.removeLoaded();
     if (this.placeholder) {
-      this.spinner.remove(this.placeholder);
-      this.placeholder.traverse((node) => {
-        if (node.geometry) node.geometry.dispose();
-        if (node.material) {
-          if (Array.isArray(node.material)) node.material.forEach((m) => m.dispose());
-          else node.material.dispose();
-        }
-      });
-      this.placeholder = null;
+      this.placeholder.visible = false;
+      if (this.placeholder.parent === this.spinner) this.spinner.remove(this.placeholder);
     }
 
     this.spinner.add(object);
+    this.loadedObject = object;
     this.focus = object;
     this.source = url;
     this.loaded = true;
+    this.enter = 0;
+  }
+
+  disposeObject(root) {
+    disposeObject(root);
+  }
+
+  /** Drop the current GLB and show the procedural placeholder again. */
+  removeLoaded() {
+    if (this.mixer) {
+      try {
+        this.mixer.stopAllAction();
+        if (this.focus) this.mixer.uncacheRoot(this.focus);
+      } catch {
+        /* ignore */
+      }
+      this.mixer = null;
+    }
+
+    if (this.loadedObject) {
+      this.spinner.remove(this.loadedObject);
+      this.disposeObject(this.loadedObject);
+      this.loadedObject = null;
+    }
+
+    if (this.placeholder) {
+      if (this.placeholder.parent !== this.spinner) this.spinner.add(this.placeholder);
+      this.placeholder.visible = true;
+      this.focus = this.placeholder;
+    } else {
+      this.focus = null;
+    }
+
+    this.loaded = false;
+    this.source = 'placeholder';
+    this.enter = 0;
+  }
+
+  clear() {
+    this.removeLoaded();
+  }
+
+  dispose() {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.removeLoaded();
+    if (this.placeholder) {
+      this.disposeObject(this.placeholder);
+      this.placeholder = null;
+    }
+    this.focus = null;
+    if (this.root.parent) this.root.parent.remove(this.root);
   }
 
   update(dt, time, mouse, config) {

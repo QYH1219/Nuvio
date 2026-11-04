@@ -1,9 +1,18 @@
 {
   "name": "codex-dynamic-bg",
   "private": true,
-  "version": "0.2.0",
-  "description": "A transparent, animated WebGL background layer for Codex Desktop, with custom images and Tripo GLB models.",
+  "version": "0.3.0",
+  "description": "A lightweight, DIY animated wallpaper layer for Codex Desktop with Wallpaper Engine workshop detection.",
   "license": "MIT",
+  "author": "QuisVic",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/QuisVic/QYH1219.git"
+  },
+  "homepage": "https://quisvic.github.io/QYH1219/",
+  "bugs": {
+    "url": "https://github.com/QuisVic/QYH1219/issues"
+  },
   "keywords": [
     "codex",
     "webgl",
@@ -19,19 +28,28 @@
     "node": ">=22"
   },
   "scripts": {
+    "start": "node tools/start.mjs",
     "dev": "vite --host 127.0.0.1 --port 5273",
     "predev": "node tools/sync-decoders.mjs",
     "build": "vite build",
     "prebuild": "node tools/sync-decoders.mjs",
+    "check:dist": "node tools/check-dist.mjs",
     "preview": "vite preview --host 127.0.0.1 --port 5274",
     "preembed": "node tools/sync-decoders.mjs",
     "embed": "vite build --mode embed",
     "build:all": "npm run embed && npm run build",
     "inject": "node tools/inject.mjs",
+    "doctor": "node tools/doctor.mjs",
+    "restore": "node tools/restore.mjs",
+    "shortcut": "node tools/shortcut.mjs",
+    "restart": "node tools/restart.mjs",
+    "test": "node --test",
     "launch:codex": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/launch-codex.ps1",
     "sync:decoders": "node tools/sync-decoders.mjs",
     "wallpaper": "node tools/wallpaper.mjs",
-    "use": "node tools/use.mjs"
+    "use": "node tools/use.mjs",
+    "library": "node tools/library.mjs",
+    "workshop": "node tools/workshop-scan.mjs"
   },
   "dependencies": {
     "three": "^0.180.0"

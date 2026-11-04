@@ -17,6 +17,7 @@ export class BackgroundLayer {
       uMotion: { value: 1 },
       uScreenAspect: { value: 16 / 9 },
       uImageAspect: { value: 16 / 9 },
+      uFitMode: { value: 0 },
     };
 
     this.mesh = new THREE.Mesh(
@@ -64,6 +65,25 @@ export class BackgroundLayer {
 
   setCameraRef(camera) {
     this.cameraRef = camera;
+  }
+
+  /**
+   * `auto` keeps whatever the scene author chose; `cover` / `stretch` force a
+   * mapping. Live uniform, so switching does not rebuild the material.
+   */
+  setFit(fit) {
+    const mode = String(fit || 'auto').toLowerCase();
+    if (mode === 'auto') {
+      // Scene wallpapers keep the fit recorded in scene.json; images and
+      // videos fall back to cover.
+      if (!this.sceneMaterial) this.uniforms.uFitMode.value = 0;
+      return;
+    }
+    const value = mode === 'stretch' ? 1 : 0;
+    this.uniforms.uFitMode.value = value;
+    if (!this.sceneMaterial) return;
+    const uniform = this.sceneMaterial.uniforms?.uFitMode;
+    if (uniform) uniform.value = value;
   }
 
   resize(camera, width, height) {

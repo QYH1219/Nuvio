@@ -12,6 +12,13 @@ const VIDEO_CANDIDATES = ['assets/background.mp4', 'assets/background.webm'];
 
 const SCENE_CANDIDATES = ['assets/wallpaper/scene.json'];
 
+/**
+ * Library manifest written by `npm run library -- apply <id>`. It points at an
+ * imported wallpaper folder so a single slot can hold many wallpapers without
+ * copying artwork around on every switch.
+ */
+const ACTIVE_MANIFEST = 'assets/active.json';
+
 export function assetBaseUrl() {
   return window.__CXD_ASSET_BASE__ || './';
 }
@@ -42,6 +49,24 @@ async function exists(url) {
   }
 }
 
+async function readActiveManifest(base) {
+  const url = join(base, ACTIVE_MANIFEST);
+  try {
+    const res = await fetch(url, { cache: 'no-store' });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!data || typeof data !== 'object' || !data.entry) return null;
+    const kind = String(data.kind || '').toLowerCase();
+    if (!['image', 'video', 'scene'].includes(kind)) return null;
+    const url = join(base, String(data.entry));
+    // A stale manifest after a manual delete must fall back to legacy probing.
+    if (!(await exists(url))) return null;
+    return { kind, url, meta: data };
+  } catch {
+    return null;
+  }
+}
+
 export async function probeAssets() {
   const base = assetBaseUrl();
   const explicit = window.__CXD_ASSETS__ || {};
@@ -50,9 +75,24 @@ export async function probeAssets() {
     imageUrl: explicit.imageUrl || explicit.background || null,
     modelUrl: explicit.modelUrl || explicit.model || null,
     sceneUrl: explicit.sceneUrl || explicit.scene || null,
+    sceneData: explicit.sceneData || null,
   };
 
-  if (!result.videoUrl) {
+  // CLI/injector-provided sources are explicit user intent and win over the
+  // library manifest. In normal `npm start` runs there is no explicit source,
+  // so the wallpaper chosen in the panel is authoritative.
+  const hasExplicit = Boolean(explicit.videoUrl || explicit.video || explicit.imageUrl ||
+    explicit.background || explicit.sceneUrl || explicit.scene);
+  const active = hasExplicit ? null : await readActiveManifest(base);
+  if (active) {
+    if (active.kind === 'image' && !result.imageUrl) result.imageUrl = active.url;
+    if (active.kind === 'video' && !result.videoUrl) result.videoUrl = active.url;
+    if (active.kind === 'scene' && !result.sceneUrl) result.sceneUrl = active.url;
+    result.active = active.meta;
+    result.activeKind = active.kind;
+  }
+
+  if (!active && !result.videoUrl) {
     for (const path of VIDEO_CANDIDATES) {
       const url = join(base, path);
       if (await exists(url)) {
@@ -61,7 +101,7 @@ export async function probeAssets() {
       }
     }
   }
-  if (!result.imageUrl) {
+  if (!active && !result.imageUrl) {
     for (const path of IMAGE_CANDIDATES) {
       const url = join(base, path);
       if (await exists(url)) {
@@ -79,7 +119,9 @@ export async function probeAssets() {
       }
     }
   }
-  if (!result.sceneUrl) {
+  // A manifest is authoritative: do not let stale background.mp4 / scene.json
+  // files of another kind win after the user switched to a library wallpaper.
+  if (!active && !result.sceneUrl) {
     for (const path of SCENE_CANDIDATES) {
       const url = join(base, path);
       if (await exists(url)) {
@@ -101,6 +143,7 @@ async function loadSceneJson(url) {
 
 function resolveAsset(name, sceneUrl) {
   if (/^https?:|^data:|^blob:/.test(name)) return name;
+  if (!sceneUrl) return name;
   const absolute = new URL(sceneUrl, location.href);
   return new URL(name, new URL('.', absolute)).href;
 }
@@ -110,8 +153,8 @@ function resolveAsset(name, sceneUrl) {
  * Only `shake` masks are consumed; foliagesway uses MASK=0 in the source
  * wallpaper, so its mask is decorative metadata.
  */
-export async function loadSceneWallpaper(url) {
-  const data = await loadSceneJson(url);
+export async function loadSceneWallpaper(url, inlineData = null) {
+  const data = inlineData || (await loadSceneJson(url));
   const imageUrl = resolveAsset(data.image, url);
   const image = await loadImage(imageUrl);
 
@@ -134,6 +177,7 @@ export async function loadSceneWallpaper(url) {
 
   return {
     image,
+    fit: data.fit || 'cover',
     pipeline: [
       ...(sway ? [sway] : []),
       ...resolvedShakes.map(({ image: maskImage, ...entry }) => ({
@@ -225,7 +269,24 @@ export async function startVideo(video) {
 }
 
 /** Procedural fallback so the demo looks finished before real art arrives. */
-export function createFallbackBackground(width = 2048, height = 1152) {
+const FALLBACK_PALETTE = {
+  glowA: '#48d6cc',
+  glowB: '#7e62c4',
+};
+
+function hexToRgba(hex, alpha) {
+  const value = String(hex || '').replace('#', '');
+  const normalized = value.length === 3 ? value.split('').map((c) => c + c).join('') : value;
+  const int = Number.parseInt(normalized, 16);
+  if (!Number.isFinite(int)) return `rgba(72, 214, 204, ${alpha})`;
+  const r = (int >> 16) & 255;
+  const g = (int >> 8) & 255;
+  const b = int & 255;
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+export function createFallbackBackground(width = 2048, height = 1152, palette = FALLBACK_PALETTE) {
+  const colors = { ...FALLBACK_PALETTE, ...(palette || {}) };
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
@@ -247,8 +308,8 @@ export function createFallbackBackground(width = 2048, height = 1152) {
     height * 0.66,
     width * 0.55,
   );
-  glow.addColorStop(0, 'rgba(72, 214, 204, 0.40)');
-  glow.addColorStop(0.35, 'rgba(34, 112, 136, 0.22)');
+  glow.addColorStop(0, hexToRgba(colors.glowA, 0.4));
+  glow.addColorStop(0.35, hexToRgba(colors.glowA, 0.22));
   glow.addColorStop(1, 'rgba(0, 0, 0, 0)');
   ctx.fillStyle = glow;
   ctx.fillRect(0, 0, width, height);
@@ -261,14 +322,14 @@ export function createFallbackBackground(width = 2048, height = 1152) {
     height * 0.2,
     width * 0.42,
   );
-  warm.addColorStop(0, 'rgba(126, 98, 196, 0.20)');
+  warm.addColorStop(0, hexToRgba(colors.glowB, 0.2));
   warm.addColorStop(1, 'rgba(0, 0, 0, 0)');
   ctx.fillStyle = warm;
   ctx.fillRect(0, 0, width, height);
 
   const band = ctx.createLinearGradient(0, height * 0.38, 0, height * 0.7);
   band.addColorStop(0, 'rgba(46, 168, 176, 0)');
-  band.addColorStop(0.5, 'rgba(52, 178, 182, 0.10)');
+  band.addColorStop(0.5, hexToRgba(colors.glowA, 0.1));
   band.addColorStop(1, 'rgba(46, 168, 176, 0)');
   ctx.fillStyle = band;
   ctx.fillRect(0, height * 0.36, width, height * 0.36);

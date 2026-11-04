@@ -13,6 +13,12 @@ const copies = [
   ['basis', 'basis_transcoder.wasm'],
 ];
 
+const licenses = [
+  ['node_modules/three/LICENSE', 'public/vendor/three/LICENSE'],
+  ['licenses/Apache-2.0.txt', 'public/vendor/draco/LICENSE'],
+  ['licenses/Apache-2.0.txt', 'public/vendor/basis/LICENSE'],
+];
+
 let copied = 0;
 for (const [sourceDir, file] of copies) {
   const source = join(three, sourceDir, file);
@@ -26,4 +32,18 @@ for (const [sourceDir, file] of copies) {
   copied += 1;
 }
 
+let licenseCount = 0;
+for (const [sourceRel, targetRel] of licenses) {
+  const source = join(root, sourceRel);
+  if (!existsSync(source)) {
+    console.warn(`[cxd] missing license: ${source}`);
+    continue;
+  }
+  const target = join(root, targetRel);
+  mkdirSync(dirname(target), { recursive: true });
+  copyFileSync(source, target);
+  licenseCount += 1;
+}
+
 console.log(`[cxd] local decoders ready (${copied}/${copies.length})`);
+console.log(`[cxd] third-party licenses ready (${licenseCount}/${licenses.length})`);

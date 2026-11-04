@@ -68,4 +68,17 @@ export class Particles {
     this.material.uniforms.uPixelRatio.value = pixelRatio;
     this.group.visible = config.particles;
   }
+
+  dispose() {
+    if (this.disposed) return;
+    this.disposed = true;
+    if (this.points) {
+      this.group.remove(this.points);
+      this.points.geometry.dispose();
+      this.points.material.dispose();
+      this.points = null;
+      this.material = null;
+    }
+    if (this.group.parent) this.group.parent.remove(this.group);
+  }
 }

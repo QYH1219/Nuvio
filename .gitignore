@@ -10,12 +10,12 @@ public/wallpaper/
 # User-supplied art and models
 public/assets/*
 !public/assets/README.md
-!public/assets/.gitkeep
 
 # Local env / editor / OS noise
 .env
 .env.*
 !.env.example
+.cxd-inject.json
 .DS_Store
 Thumbs.db
 Desktop.ini

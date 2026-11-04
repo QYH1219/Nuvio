@@ -64,6 +64,7 @@ export class SceneWallpaperMaterial extends THREE.ShaderMaterial {
     while (maskTextures.length < 3) maskTextures.push(neutralFlowMap());
 
     const imageAspect = image.width / image.height;
+    const fitMode = String(data.fit || 'cover').toLowerCase();
     const firstMask = shakes.find((entry) => entry.image);
     const maskScale = firstMask
       ? firstMask.image.width / image.width
@@ -79,6 +80,7 @@ export class SceneWallpaperMaterial extends THREE.ShaderMaterial {
       uDim: { value: 0.2 },
       uScreenAspect: { value: 16 / 9 },
       uImageAspect: { value: imageAspect },
+      uFitMode: { value: fitMode === 'stretch' ? 1 : 0 },
       uResolution: { value: new THREE.Vector2(1, 1) },
       uMouse: { value: new THREE.Vector2() },
       uShakeAmount: { value: 1 },
@@ -110,9 +112,13 @@ export class SceneWallpaperMaterial extends THREE.ShaderMaterial {
     this.imageAspect = imageAspect;
   }
 
-  resize(_camera, width, height, pixelRatio) {
+  resize(_camera, width, height, _pixelRatio) {
     this.uniforms.uScreenAspect.value = width / height;
-    this.uniforms.uResolution.value.set(width * pixelRatio, height * pixelRatio);
+    // `gl_FragCoord` reaches this shader in CSS viewport units in the Codex
+    // Electron surface (the drawing buffer is larger at a 1.5 DPR). Using the
+    // CSS size keeps the full artwork mapped to the full window; multiplying
+    // by DPR only sampled the top-left ~2/3 of the texture.
+    this.uniforms.uResolution.value.set(width, height);
   }
 
   update(time, mouse, config) {

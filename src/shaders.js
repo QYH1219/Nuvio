@@ -18,6 +18,7 @@ export const backgroundFragment = /* glsl */ `
   uniform float uMotion;
   uniform float uScreenAspect;
   uniform float uImageAspect;
+  uniform float uFitMode;
 
   varying vec2 vUv;
 
@@ -43,12 +44,17 @@ export const backgroundFragment = /* glsl */ `
     vec2 uv = vUv;
 
     float breath = 1.0 + 0.010 * sin(t * 0.11) * uMotion;
-    uv = (uv - 0.5) * breath + 0.5;
-    uv = coverUv(uv);
-
-    vec2 drift = vec2(sin(t * 0.041), cos(t * 0.036)) * 0.0045 * uMotion;
-    vec2 par = uMouse * vec2(0.015, 0.0095) * uParallax;
-    uv += drift + par;
+    if (uFitMode > 0.5) {
+      // stretch: every source pixel must stay visible, so sample the plain
+      // [0,1] square and skip the zoom/drift that would crop the edges.
+      uv = clamp(uv, 0.0, 1.0);
+    } else {
+      uv = (uv - 0.5) * breath + 0.5;
+      uv = coverUv(uv);
+      vec2 drift = vec2(sin(t * 0.041), cos(t * 0.036)) * 0.0045 * uMotion;
+      vec2 par = uMouse * vec2(0.015, 0.0095) * uParallax;
+      uv += drift + par;
+    }
 
     vec2 dir = normalize(vUv - 0.5 + 1e-5);
     float ca = 0.0014 * (0.3 + length(vUv - 0.5)) * uParallax;
@@ -190,6 +196,7 @@ export const sceneFragment = /* glsl */ `
   uniform float uDim;
   uniform float uScreenAspect;
   uniform float uImageAspect;
+  uniform float uFitMode;
   uniform vec2 uResolution;
   uniform vec2 uMouse;
 
@@ -261,6 +268,15 @@ export const sceneFragment = /* glsl */ `
   }
 
   /*
+   * fit=cover crops the artwork to the window; fit=stretch keeps every pixel
+   * and lets the aspect ratio follow the window. The default scene wallpaper
+   * uses stretch so the whole illustration stays visible inside Codex.
+   */
+  vec2 fitUv(vec2 uv) {
+    return uFitMode > 0.5 ? uv : coverUv(uv, uScreenAspect, uImageAspect);
+  }
+
+  /*
    * effects/shake.vert scales the flow-map lookup by maskSize / imageSize;
    * the mask here is half-resolution, so uMaskScale is ~0.5.
    */
@@ -314,8 +330,10 @@ export const sceneFragment = /* glsl */ `
     vec2 screenUv = gl_FragCoord.xy / max(uResolution, vec2(1.0));
     screenUv.y = 1.0 - screenUv.y; // top-left origin, matching WE texture space
 
-    vec2 uv = coverUv(screenUv, uScreenAspect, uImageAspect);
-    uv = (uv - 0.5) * TEX_MARGIN + 0.5;
+    vec2 uv = fitUv(screenUv);
+    // Scene quads in Wallpaper Engine are slightly enlarged (scale 1.05).
+    // Cover mode reproduces that crop; stretch must keep the full frame.
+    if (uFitMode < 0.5) uv = (uv - 0.5) * TEX_MARGIN + 0.5;
 
     // cameraparallax: amount 0.1, mouseinfluence 0.5 (normalized to taste).
     uv += uMouse * vec2(0.012, 0.0085) * uParallax;
@@ -326,6 +344,10 @@ export const sceneFragment = /* glsl */ `
     uv += shakeOffset(uv, uShake1);
     uv += shakeOffset(uv, uShake0);
     uv += swayOffset(uv);
+
+    // Effects can push UVs past the artwork edge. Clamp instead of revealing
+    // empty texture space, so stretch mode never loses part of the image.
+    uv = clamp(uv, 0.0, 1.0);
 
     vec3 col = texture2D(uTex, uv).rgb;
     col *= 1.0 - uDim * 0.62;

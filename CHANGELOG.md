@@ -1,0 +1,76 @@
+# Changelog
+
+All notable changes to this project are documented here.
+
+## [0.3.0] - 2026-11-04
+
+### Added
+
+- Wallpaper Engine local workshop scanner: detects wallpapers already
+  downloaded under `steamapps/workshop/content/431960`, with type, title,
+  preview, and size metadata.
+- Local wallpaper library under `public/assets/library/<id>/`, plus
+  `public/assets/active.json` as the single source of truth for the currently
+  applied wallpaper.
+- "创意工坊" section in the settings panel: preview cards, one-click import,
+  apply, delete, and progress for video/scene conversion.
+- `npm run workshop` and `npm run library` CLI helpers.
+- Fill modes `auto` / `cover` / `stretch` for images, videos, and scene
+  wallpapers. `stretch` samples the full artwork without cropping.
+- Quality tiers `saver` / `balanced` / `high`, automatic downgrade on sustained
+  low frame rate, and idle pause for static wallpapers.
+- Four-section compact settings panel: 壁纸 / 外观 / 性能 / 高级.
+
+### Changed
+
+- Default quality is `saver`; the rendered UI stays responsive on integrated
+  GPUs and while Codex is busy.
+- Theme and readability preset controls are removed from the panel. Picking a
+  wallpaper now owns the palette; the values remain available for the
+  procedural fallback and existing configs.
+- 30 FPS tiers use timer scheduling instead of an unconditional rAF loop.
+- Artwork mode releases PMREM, lights, particles, and the composer, then
+  re-creates them lazily when switching back to a procedural/high tier.
+
+### Fixed
+
+- Workshop preview images were never rendered because the panel checked
+  `entry.preview` instead of `entry.hasPreview`.
+- Switching from `saver` to `high` after startup left particles and Bloom
+  missing permanently.
+- `active.json` could lose to stale built-in candidate wallpaper files, so the
+  last wallpaper chosen in the panel was not the one that loaded.
+- The white seam above the chat area in wallpaper mode.
+
+## [0.2.0] - 2026-11-04
+
+### Added
+
+- Wallpaper Engine scene wallpaper import (`shake` and `foliagesway` effects).
+- Wallpaper Engine video wallpaper import and current-wallpaper detection.
+- Local asset library backed by IndexedDB, with image / video / GLB slots.
+- Wallpaper mode: transparent Codex chrome, hidden theme selector, automatic
+  readability preset.
+- Restore, doctor, shortcut, restart, and start helper tools.
+- Build and GitHub Pages workflows.
+
+### Fixed
+
+- Scene wallpapers now use `fit: "stretch"` so the full artwork fills the
+  window without cropping.
+- The renderer now receives CSS viewport dimensions instead of DPR-scaled
+  dimensions, fixing the "only the top-left of the wallpaper" bug.
+- Hide Codex's `_MainContentTopFade_` overlay in wallpaper mode, removing the
+  white line above the chat area.
+
+### Security
+
+- Build outputs strip user artwork from `dist/` and `dist-embed/` unless
+  `CXD_ALLOW_PRIVATE_ASSETS=1` is set.
+- CI verifies that no file under `public/assets/` (other than its README)
+  reaches a published artifact.
+
+## [0.1.0]
+
+- Initial public release: procedural WebGL background, themes, readability
+  presets, Tripo GLB loading, and Codex injection via CDP.
