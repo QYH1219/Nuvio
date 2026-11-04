@@ -160,7 +160,12 @@ function contentType(file) {
 export function safeJoin(root, relative) {
   // Strip only leading separators so an absolute URL pathname cannot replace
   // the root, but keep ".." segments for the containment check below.
-  const clean = normalize(relative).replace(/^[/\\]+/, '');
+  // Normalize both separators so Windows-style traversal is rejected on every
+  // platform (path.normalize treats "\\" as a literal character on POSIX).
+  const clean = normalize(String(relative).replace(/\\/g, '/')).replace(
+    /^[/\\]+/,
+    '',
+  );
   const target = resolve(root, clean);
   const rootPath = resolve(root) + sep;
   if (target !== resolve(root) && !target.startsWith(rootPath)) return null;
