@@ -53,7 +53,7 @@ Nuvio is the project's new name (formerly Codex Dynamic Background). Only the pu
 ## Quick start
 
 ```bash
-git clone https://github.com/QYH1219/QYH1219.git
+git clone https://github.com/QYH1219/Nuvio.git
 cd QYH1219
 npm install
 npm run dev

@@ -1,17 +1,17 @@
 {
   "name": "nuvio",
   "private": true,
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Nuvio — a lightweight, DIY animated wallpaper layer for Codex Desktop, with Wallpaper Engine workshop detection.",
   "license": "MIT",
   "author": "QuisVic",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/QYH1219/QYH1219.git"
+    "url": "git+https://github.com/QYH1219/Nuvio.git"
   },
   "homepage": "https://qyh1219.github.io/QYH1219/",
   "bugs": {
-    "url": "https://github.com/QYH1219/QYH1219/issues"
+    "url": "https://github.com/QYH1219/Nuvio/issues"
   },
   "keywords": [
     "codex",

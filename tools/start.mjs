@@ -291,7 +291,7 @@ async function askYesNo(question) {
 async function checkForUpdate() {
   if (process.env.NUVIO_NO_UPDATE_CHECK === '1') return;
   try {
-    const response = await fetch('https://api.github.com/repos/QYH1219/QYH1219/releases/latest', {
+    const response = await fetch('https://api.github.com/repos/QYH1219/Nuvio/releases/latest', {
       headers: { 'user-agent': `nuvio/${VERSION}` },
       signal: AbortSignal.timeout(1500),
     });
@@ -309,7 +309,7 @@ async function checkForUpdate() {
     };
     if (compare(latest, VERSION) > 0) {
       console.log(`[nuvio] update available: v${latest} (you have v${VERSION})`);
-      console.log(`[nuvio] ${data.html_url || 'https://github.com/QYH1219/QYH1219/releases'}`);
+      console.log(`[nuvio] ${data.html_url || 'https://github.com/QYH1219/Nuvio/releases'}`);
     }
   } catch {
     /* offline or rate limited — stay quiet */

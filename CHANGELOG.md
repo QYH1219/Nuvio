@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here.
 
+## [0.4.2] - 2026-11-04
+
+### Fixed
+
+- Update check and repository links now point to `QYH1219/Nuvio` after the
+  repository rename. The previous URLs returned 404, so 0.4.1 never reported
+  a newer release.
+
 ## [0.4.1] - 2026-11-04
 
 ### Added
