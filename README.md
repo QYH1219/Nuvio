@@ -6,10 +6,10 @@
 
 ![Codex Dynamic Background](docs/screenshots/hero.jpg)
 
-![真实注入效果](docs/screenshots/workspace.jpg)
+![背景铺满整窗，侧栏与输入框保持半透明](docs/screenshots/workspace.jpg)
 
-> 两张都是真实注入截图：壁纸按原始比例拉伸铺满整窗，聊天区与输入框保持透明，顶部渐变白线已关闭。
-> 截图中的壁纸版权归原作者所有，仅用于演示效果，不随仓库分发。
+> 截图取自项目自带的演示界面（`npm run dev`）：背景是一张程序化生成的抽象图，界面为内置 Codex 模拟面板，**不含任何用户壁纸或聊天内容**。
+> 真实注入后效果一致：背景铺满整窗，侧栏、聊天区与输入框全部半透明，顶部渐变白线已关闭。
 
 ---
 

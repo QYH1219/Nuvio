@@ -6,10 +6,10 @@ An interactive WebGL background layer for Codex Desktop: custom artwork, Tripo G
 
 ![Codex Dynamic Background](docs/screenshots/hero.jpg)
 
-![Injected into the live app](docs/screenshots/workspace.jpg)
+![Backdrop filling the window with translucent sidebar and composer](docs/screenshots/workspace.jpg)
 
-> Both images are captures of the real injected app: the wallpaper is stretched to fill the window without cropping, chat and composer stay translucent, and the top fade overlay is disabled.
-> The artwork shown belongs to its original author, is used for demonstration only, and is not distributed with this repository.
+> Captured from the built-in demo surface (`npm run dev`): the backdrop is a procedurally generated abstract image and the UI is the bundled Codex mock panel. **No user artwork or chat content is included.**
+> After injection the real Codex window behaves the same way: the backdrop fills the window, and the sidebar, chat area and composer are all translucent with the top fade overlay disabled.
 
 ---
 
