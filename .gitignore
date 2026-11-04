@@ -29,6 +29,9 @@ npm-debug.log*
 # Local screenshots that are not part of the docs
 .shots/
 
+# Local icon iteration scratch; the shipped icon lives in public/icon.ico
+docs/icon-concepts/
+
 # Local runtime state, logs and exported wallpaper bundles
 .nuvio/
 exports/

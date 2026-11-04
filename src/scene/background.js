@@ -79,7 +79,8 @@ export class BackgroundLayer {
       if (!this.sceneMaterial) this.uniforms.uFitMode.value = 0;
       return;
     }
-    const value = mode === 'stretch' ? 1 : 0;
+    // 0 = cover, 1 = stretch, 2 = contain (full artwork + letterbox).
+    const value = mode === 'stretch' ? 1 : mode === 'contain' ? 2 : 0;
     this.uniforms.uFitMode.value = value;
     if (!this.sceneMaterial) return;
     const uniform = this.sceneMaterial.uniforms?.uFitMode;

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { sceneVertex, buildSceneShader } from '../shaders.js';
+import { ARTWORK_TEXTURE_EDGE, EFFECT_TEXTURE_EDGE } from '../texture.js';
 
 function num(value, fallback) {
   const parsed = Number(value);
@@ -17,8 +18,25 @@ function pair(value, fallback) {
   return fallback;
 }
 
-function makeTexture(image, srgb, renderer, repeat = false) {
-  const texture = new THREE.Texture(image);
+function makeTexture(image, srgb, renderer, repeat = false, maxEdge = EFFECT_TEXTURE_EDGE) {
+  const width = Math.max(1, Number(image?.naturalWidth || image?.width) || 1);
+  const height = Math.max(1, Number(image?.naturalHeight || image?.height) || 1);
+  const edge = Math.max(1, Number(maxEdge) || EFFECT_TEXTURE_EDGE);
+  const scale = Math.min(1, edge / Math.max(width, height));
+  let source = image;
+  if (scale < 0.999 && typeof document !== 'undefined') {
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(width * scale));
+    canvas.height = Math.max(1, Math.round(height * scale));
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+      source = canvas;
+    }
+  }
+  const texture = new THREE.Texture(source);
   // Wallpaper Engine UVs have a top-left origin. Disable the upload flip and
   // flip the coordinate in the shader so masks and the artwork stay aligned.
   texture.flipY = false;
@@ -30,6 +48,14 @@ function makeTexture(image, srgb, renderer, repeat = false) {
   texture.magFilter = THREE.LinearFilter;
   texture.generateMipmaps = false;
   texture.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy());
+  texture.userData.nuvio = {
+    originalWidth: width,
+    originalHeight: height,
+    width: source === image ? width : source.width,
+    height: source === image ? height : source.height,
+    downscaled: scale < 0.999,
+    maxEdge: edge,
+  };
   texture.needsUpdate = true;
   return texture;
 }
@@ -79,7 +105,7 @@ export class SceneWallpaperMaterial extends THREE.ShaderMaterial {
     if (!image) throw new Error('scene wallpaper: missing image');
 
     const uniforms = {
-      uTex: { value: makeTexture(image, true, renderer) },
+      uTex: { value: makeTexture(image, true, renderer, false, ARTWORK_TEXTURE_EDGE) },
       uTime: { value: 0 },
       uParallax: { value: 1 },
       uDim: { value: 0.2 },
@@ -110,7 +136,7 @@ export class SceneWallpaperMaterial extends THREE.ShaderMaterial {
         console.warn('[codex-bg] scene texture budget reached, dropping effect');
         return null;
       }
-      const texture = makeTexture(source, srgb, renderer, repeat);
+      const texture = makeTexture(source, srgb, renderer, repeat, EFFECT_TEXTURE_EDGE);
       modes.set(key, texture);
       created.push(texture);
       return texture;
@@ -241,19 +267,29 @@ export class SceneWallpaperMaterial extends THREE.ShaderMaterial {
       depthTest: false,
       toneMapped: false,
     });
+    this.renderer = renderer;
 
     this.textures = created;
     this.imageAspect = image.width / image.height;
     this.effectTypes = stages.map((stage) => stage.type);
   }
 
-  resize(_camera, width, height, _pixelRatio) {
+  resize(_camera, width, height, pixelRatio = 1) {
     this.uniforms.uScreenAspect.value = width / height;
-    // `gl_FragCoord` reaches this shader in CSS viewport units in the Codex
-    // Electron surface (the drawing buffer is larger at a 1.5 DPR). Using the
-    // CSS size keeps the full artwork mapped to the full window; multiplying
-    // by DPR only sampled the top-left ~2/3 of the texture.
-    this.uniforms.uResolution.value.set(width, height);
+    // `gl_FragCoord` is always expressed in drawing-buffer pixels, not CSS
+    // pixels. Dividing it by the CSS size made the artwork zoom in by exactly
+    // the pixel ratio, so switching quality appeared to stretch/crop the
+    // wallpaper. Normalize with the real backbuffer size instead: screenUv
+    // stays 0..1 at every tier, and quality only changes sampling density.
+    // Read the actual drawing buffer instead of multiplying by a nominal
+    // pixel ratio: `setSize()` floors odd CSS/DPR products by one pixel, and
+    // even a one-pixel mismatch makes the artwork drift at non-integer DPRs.
+    const buffer = this.renderer?.getDrawingBufferSize?.(new THREE.Vector2());
+    const scale = Number.isFinite(pixelRatio) && pixelRatio > 0 ? pixelRatio : 1;
+    this.uniforms.uResolution.value.set(
+      Math.max(1, buffer?.x || Math.round(width * scale)),
+      Math.max(1, buffer?.y || Math.round(height * scale)),
+    );
   }
 
   update(time, mouse, config) {

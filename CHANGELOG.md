@@ -2,6 +2,42 @@
 
 All notable changes to this project are documented here.
 
+## [0.5.2] - 2026-11-04
+
+### Fixed
+
+- Quality tiers no longer change framing. `screenUv` was derived from
+  `gl_FragCoord / CSS size`, so raising the pixel ratio pushed the UV ceiling
+  to 1.25 / 1.5 and the wallpaper looked zoomed and cropped. The material now
+  uses `renderer.getDrawingBufferSize()`, and all three tiers clamp to 1.0.
+  Switching saver → balanced → high is now a sampling/frame-rate change only.
+- `applyQuality()` no longer touches Bloom, particles, MSAA, or `fit`. MSAA is
+  off on every tier because the background is a single full-screen quad.
+- WebGL creation failure keeps the host element and paints a CSS gradient
+  fallback instead of removing the root and leaving a black window.
+
+### Added
+
+- Texture budget in `src/texture.js`: 4096 px long edge for wallpaper base
+  textures, 2048 px for mask/normal/phase effect maps, proportional
+  downscaling with original/upload size recorded in `texture.userData.nuvio`.
+- Runtime diagnostics panel: FPS, tier, drawing-buffer size, texture count and
+  estimated VRAM, draw calls, programs, triangles, context-loss state.
+- `pauseWhenUnfocused` (default on): the render loop stops while the Codex
+  window is unfocused and resumes on focus.
+- WebGL context lost/restored handling: stop the loop, mark textures dirty on
+  restore, re-upload, resize, and wake without restarting Codex.
+- Settings panel polish: collapsible sections (Advanced starts collapsed),
+  per-section `↺` reset, export/import moved into a `⋯` menu, 11 px text floor,
+  and `auto / cover / contain / stretch` fill labels.
+
+### Changed
+
+- README documents the real quality-tier behavior, the fourth fill mode, the
+  five-section panel, the texture budget, and the new diagnostics/pause paths.
+- `test/texture.test.mjs` covers downscaling, the 4096/2048 caps, no-upscale,
+  byte accounting, and multi-texture summaries.
+
 ## [0.5.1] - 2026-11-04
 
 ### Fixed

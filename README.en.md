@@ -25,15 +25,15 @@ Nuvio is the project's new name (formerly Codex Dynamic Background). Only the pu
 - **Image / video / scene / web wallpapers**: WebP / PNG / JPG, MP4 / WebM, an imported Wallpaper Engine `scene`, or a self-contained `web` project rendered in a sandboxed iframe.
 - **Scene effect replay**: automatic `scene.pkg` extraction, replaying `shake`, `foliagesway`, `waterwaves`, `waterripple`, and `waterflow` in the same order Wallpaper Engine applies them.
 - **Tripo / glTF models**: GLB and glTF loading with automatic centering and bounding-box scaling; Draco, Meshopt, and KTX2 supported.
-- **Motion**: model spin, mouse tilt, bloom, particles, vignette, film grain, and click ripples.
-- **Adjustable rendering**: quality tier, motion, parallax, bloom, grain, dim, model scale/position/spin, and panel opacity.
+- **Motion**: model spin, mouse tilt, vignette, film grain, and click ripples. Bloom and particles only run on the procedural fallback; once a wallpaper is active they stay off so the artwork keeps its detail.
+- **Adjustable rendering**: quality tier, motion, parallax, bloom, grain, dim, model scale/position/spin, and UI frost strength.
 - **Assets from the settings panel**: pick or drop images, videos, and single-file GLBs without touching a terminal. Files stay in local IndexedDB and survive reloads.
 - **Creative workshop**: scans Wallpaper Engine wallpapers already downloaded locally (`431960`), with preview cards, one-click import, apply, and delete. No network access and no automatic downloads.
 - **Local wallpaper library**: imported video/scene wallpapers live under `public/assets/library/<id>/`; `active.json` records the applied wallpaper and restores it after reloads.
-- **Three fill modes**: `auto` / `cover` / `stretch` for images, videos, and scene wallpapers. `stretch` shows the complete artwork without cropping.
-- **Lightweight quality tiers**: Saver / Balanced / High, with Saver as the default. Sustained low FPS drops one tier, and static wallpapers can stop rendering while idle.
+- **Four fill modes**: `auto` / `cover` / `contain` / `stretch` for images, videos, and scene wallpapers. `contain` shows the complete artwork (may letterbox); `stretch` fills the window without cropping.
+- **Lightweight quality tiers**: Saver / Balanced / High, with Saver as the default. Tiers only change sampling density and the FPS cap, never the framing. Sustained low FPS drops one tier, static wallpapers can stop rendering while idle, and rendering pauses when the window loses focus.
 - **Desktop wallpaper mode**: picking an image, video, or scene wallpaper switches to the crisp desktop look and removes the extra blur/vignette overlay. Once artwork owns the screen, theme presets are no longer layered on top.
-- **Settings in injected mode**: a compact panel is available from the bottom-right gear or `G`, with JSON export/import.
+- **Settings in injected mode**: a compact panel is available from the bottom-right gear or `G`. Sections collapse and reset individually; JSON export/import lives in the `⋯` menu (config only, no wallpaper files).
 - **Translucent Codex shell**: main surface and side panels become translucent; wallpaper mode also removes Codex workspace pseudo-surface overlays and blur, while settings pages stay opaque.
 - **Persistent settings**: configuration is stored in `localStorage` and restored on the next injection.
 - **Runtime injection**: delivered over the Chrome DevTools Protocol without modifying the Codex installation. A resident injector keeps the layer alive across reloads.
@@ -126,16 +126,19 @@ http://127.0.0.1:5273/shader-preview.html?t=4
 diff. Without a fixture the page shows setup instructions and leaves normal
 preview/injection untouched.
 
-The panel has four fixed sections:
+The panel has five sections. Every section except Wallpaper collapses, and each section header has a `↺` button that resets only that section:
 
 | Section | Contents |
 | --- | --- |
 | Wallpaper | local files / drag-and-drop, creative workshop results |
-| Look | fill mode, surface opacity, background dim, vignette |
-| Performance | quality tier, automatic downgrade, idle pause, motion, parallax |
-| Advanced | bloom, grain, scene shake/sway/water, GLB model |
+| Look | fill mode (auto / cover / contain / stretch), UI frost, background dim, vignette |
+| Performance | quality tier, automatic downgrade, idle pause, pause when unfocused, motion, parallax |
+| Advanced | bloom, particles (procedural only), grain, scene shake/sway/water, GLB placement, runtime diagnostics |
+| System | restore on login (writes only Startup\Nuvio.lnk) |
 
-Themes and readability presets are no longer exposed: once a wallpaper is active it owns the palette, and layering a theme on top only muddies the artwork. Existing `theme` / `readability` values still apply to the procedural fallback. Inputs, textareas, and `contenteditable` elements do not trigger the `G` shortcut.
+Themes and readability presets are no longer exposed: once a wallpaper is active it owns the palette, and layering a theme on top only muddies the artwork. Existing `theme` / `readability` values still apply to the procedural fallback. Inputs, textareas, and `contenteditable` elements do not trigger the `G` shortcut. Advanced starts collapsed.
+
+Quality tiers never change framing: all three share the same `fit` and UVs and only change the drawing-buffer sampling density (1.0× / 1.25× / 1.5×) and FPS cap (30 / 30 / 60). The old "zoom on higher tiers" bug came from dividing by the CSS size instead of `renderer.getDrawingBufferSize()`, which pushed the UV ceiling to 1.25 / 1.5.
 
 ### Live demo (optional)
 
@@ -412,13 +415,14 @@ Stored in `localStorage` under `codex-dynamic-bg:v2`:
 | `theme` | `aurora` | `aurora` / `deep-space` / `cyber` / `rain` / `paper` / `mono` |
 | `readability` | `balanced` | `wallpaper` / `clear` / `balanced` / `immersive` / `custom` |
 | `wallpaperMode` | `false` | Derived wallpaper state; set automatically for image/video/scene backgrounds and cleared when the wallpaper is removed |
-| `quality` | `saver` | `saver` / `balanced` / `high`; controls DPR, bloom, particles, and scheduling. Legacy `low` / `medium` are mapped |
+| `quality` | `saver` | `saver` / `balanced` / `high`; sampling density 1.0× / 1.25× / 1.5× and FPS cap 30 / 30 / 60. Never changes `fit` or framing. Legacy `low` / `medium` are mapped |
 | `autoQuality` | `true` | Drops one tier after sustained low FPS (once per session, never upgrades automatically) |
 | `idlePause` | `true` | Stops rendering static image / scene wallpapers while idle |
-| `fit` | `auto` | `auto` / `cover` / `stretch`; applies to images, videos, and scene wallpapers |
+| `pauseWhenUnfocused` | `true` | Pauses the render loop while the Codex window is unfocused |
+| `fit` | `auto` | `auto` / `cover` / `contain` / `stretch`; applies to images, videos, and scene wallpapers |
 | `motion` | `1` | Global motion strength |
 | `parallax` | `1` | Mouse parallax |
-| `bloom` | `0.85` | Bloom strength |
+| `bloom` | `0.85` | Bloom strength (procedural fallback only) |
 | `grain` | `0.55` | Film grain |
 | `dim` | `0.12` | Background dimming |
 | `vignette` | `0.45` | Vignette strength |
@@ -428,12 +432,23 @@ Stored in `localStorage` under `codex-dynamic-bg:v2`:
 | `sceneShake` | `1` | Scene wallpaper shake strength |
 | `sceneSway` | `1` | Scene wallpaper foliage sway strength |
 | `sceneWater` | `1` | Scene wallpaper water waves / ripple / flow strength |
-| `particles` | `true` | Particle toggle |
+| `particles` | `true` | Particle toggle (procedural fallback only) |
 | `codexMock` | `true` | Mock shell in preview |
-| `surfaceOpacity` | `0.22` | Codex panel opacity (live in injection mode) |
+| `surfaceOpacity` | `0.22` | Codex panel frost strength (live in injection mode, higher = more opaque) |
 | `showPanel` | `false` | Settings panel state (not written to exported JSON) |
 
-`theme` / `readability` only affect the procedural fallback and are no longer exposed in the 0.3.0 panel. Once an image, video, or scene wallpaper is active, it owns the palette; use the Look section to adjust `surfaceOpacity`, `dim`, and `vignette` directly.
+`theme` / `readability` only affect the procedural fallback and are no longer exposed in the panel. Once an image, video, or scene wallpaper is active, it owns the palette; use the Look section to adjust `surfaceOpacity`, `dim`, and `vignette` directly.
+
+## Texture budget
+
+Wallpaper VRAM is dominated by textures, not draw calls. `src/texture.js` applies a uniform downscale budget:
+
+| Use | Max long edge | Notes |
+| --- | --- | --- |
+| Image / scene base texture | 4096 | Proportional downscale; never upscales |
+| mask / normal / phase effect textures | 2048 | Low-frequency layers, 2K is enough |
+
+Original size, upload size, and the downscale flag live in `texture.userData.nuvio`; the runtime diagnostics panel reports texture count and estimated VRAM. A scene wallpaper typically costs 1 draw call, 1 program, 2 triangles, and 5 textures (~8 MB with the test artwork). Bloom, particles, and the composer are not loaded in wallpaper mode.
 
 ## JavaScript API
 
@@ -528,7 +543,8 @@ A failed model load does not break the page. It falls back to the placeholder cr
 - Injection is scoped to the current Codex process. The injector must stay resident, or reloads lose the scheduled script.
 - `--once` keeps the current document only; the next refresh removes the layer.
 - Keep the CDP and control ports bound to `127.0.0.1`; never expose them to a LAN.
-- 4K artwork plus large models can be GPU-heavy. Lower `quality` first, then disable particles.
+- 4K artwork plus large models can be GPU-heavy. In order: lower `quality`, enable `idlePause` / `pauseWhenUnfocused`, downscale the source to 2560/3840, and only then shrink the model. Bloom and particles are already off in wallpaper mode, so toggling them saves nothing.
+- WebGL context loss stops the loop and records the state; `webglcontextrestored` re-uploads textures and resumes without restarting Codex. If WebGL creation fails outright, a CSS gradient fallback stays visible instead of a black window.
 - If the background looks washed out, inject with `--surface 0.15 --dim 0.05`, or choose the Clear readability preset in the panel. Lower panel opacity makes artwork clearer but reduces text contrast.
 - The preview site and injected Codex use separate IndexedDB stores. Import assets in each origin, or use `public/assets` / `npm run use` for a shared disk-based setup.
 - Linux/macOS launcher paths and process names may need adjustment.

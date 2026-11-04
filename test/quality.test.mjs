@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   DEFAULTS,
+  QUALITY,
+  QUALITY_ORDER,
   cheaperQuality,
   normalizeQuality,
   qualityFor,
@@ -28,6 +30,17 @@ test('saver is the default and 30 FPS tiers use timer scheduling', () => {
   assert.equal(qualityFor('saver').fps, 30);
   assert.equal(qualityFor('balanced').fps, 30);
   assert.equal(qualityFor('high').fps, 60);
+});
+
+test('quality tiers change sampling and frame rate only', () => {
+  const allowed = new Set(['label', 'hint', 'dpr', 'fps']);
+  for (const tier of QUALITY_ORDER) {
+    assert.deepEqual(new Set(Object.keys(QUALITY[tier])), allowed);
+  }
+  assert.deepEqual(
+    QUALITY_ORDER.map((tier) => QUALITY[tier].dpr),
+    [1, 1.25, 1.5],
+  );
 });
 
 test('performance governor downgrades once after sustained low FPS', () => {

@@ -9,35 +9,30 @@ const STORAGE_KEY = 'codex-dynamic-bg:v2';
 export const QUALITY = {
   saver: {
     label: '省电',
-    hint: '1.0 DPR · 30 FPS · 无辉光 · 无粒子',
+    hint: '1.0× 采样 · 30 FPS',
     dpr: 1,
     fps: 30,
-    antialias: false,
-    bloom: false,
-    particles: false,
-    particleScale: 0,
   },
   balanced: {
     label: '平衡',
-    hint: '1.25 DPR · 30 FPS · 无辉光 · 无粒子',
+    hint: '1.25× 采样 · 30 FPS',
     dpr: 1.25,
     fps: 30,
-    antialias: false,
-    bloom: false,
-    particles: false,
-    particleScale: 0,
   },
   high: {
-    label: '高画质',
-    hint: '1.5 DPR · 60 FPS · 辉光 · 粒子',
+    label: '高清',
+    hint: '1.5× 采样 · 60 FPS',
     dpr: 1.5,
     fps: 60,
-    antialias: true,
-    bloom: true,
-    particles: true,
-    particleScale: 1,
   },
 };
+
+/**
+ * Quality changes sampling density and the frame cap only. It must never
+ * change framing, aspect ratio, motion, bloom or particles: picking a tier is
+ * a performance decision, not a different look.
+ */
+export const FIT_IDS = ['auto', 'cover', 'contain', 'stretch'];
 
 /** Cheapest first. Used by the automatic downgrade governor. */
 export const QUALITY_ORDER = ['saver', 'balanced', 'high'];
@@ -67,6 +62,7 @@ export const DEFAULTS = {
   quality: 'saver',
   autoQuality: true,
   idlePause: true,
+  pauseWhenUnfocused: true,
   motion: 1,
   parallax: 1,
   bloom: 0.85,
@@ -94,7 +90,7 @@ export function loadConfig() {
     const parsed = JSON.parse(raw);
     const merged = { ...DEFAULTS, ...(parsed && typeof parsed === 'object' ? parsed : {}) };
     merged.quality = normalizeQuality(merged.quality);
-    if (!['auto', 'cover', 'stretch'].includes(merged.fit)) merged.fit = DEFAULTS.fit;
+    if (!FIT_IDS.includes(merged.fit)) merged.fit = DEFAULTS.fit;
     return merged;
   } catch {
     return { ...DEFAULTS };

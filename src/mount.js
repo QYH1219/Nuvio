@@ -5,6 +5,7 @@ import {
   resetConfig,
   DEFAULTS,
   QUALITY,
+  FIT_IDS,
   normalizeQuality,
   qualityFor,
 } from './config.js';
@@ -47,7 +48,7 @@ const GEAR_ICON = `
 `;
 
 const THEME_IDS = new Set(THEMES.map((theme) => theme.id));
-const FIT_IDS = new Set(['auto', 'cover', 'stretch']);
+const FIT_ID_SET = new Set(FIT_IDS);
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -112,7 +113,7 @@ function sanitizeConfigPatch(input) {
       return;
     }
     if (key === 'fit') {
-      if (!FIT_IDS.has(value)) return;
+      if (!FIT_ID_SET.has(value)) return;
       patch[key] = value;
       return;
     }
@@ -153,10 +154,15 @@ export async function mount(host, options = {}) {
     engine = new BackgroundEngine(root, config);
   } catch (error) {
     console.error('[codex-bg] WebGL init failed', error);
+    // Keep the layer and paint a static CSS fallback. Removing the root would
+    // also remove the fallback and leave Codex with a transparent/black window
+    // depending on the host, which looks like Nuvio crashed the app.
+    root.classList.add('cxd-fallback');
     root.style.background =
       'radial-gradient(60% 60% at 62% 62%, rgba(52,180,175,.28), transparent 70%), radial-gradient(50% 50% at 20% 18%, rgba(120,92,180,.22), transparent 70%), #04060b';
-    root.remove();
-    document.body.classList.remove('cxd-embedded');
+    root.querySelectorAll('canvas').forEach((canvas) => canvas.remove());
+    // A static fallback still needs to report why the dynamic layer is gone.
+    root.dataset.cxdError = String(error?.message || error || 'webgl-unavailable');
     return { engine: null, config, error };
   }
 
@@ -659,11 +665,13 @@ export async function mount(host, options = {}) {
     if (panelRef) panelRef.fps.textContent = `${fps} FPS · ${qualityFor(config.quality).label}`;
     governor.sample(fps, config.quality, Boolean(config.autoQuality));
     try {
-      window.__CXD_STATS__ = {
+      const stats = {
         ...engine.stats(),
         fps,
         autoDowngraded: governor.applied,
       };
+      window.__CXD_STATS__ = stats;
+      panelRef?.updateStats?.(stats);
     } catch {
       /* ignore */
     }
@@ -754,6 +762,11 @@ export async function mount(host, options = {}) {
     },
   );
   uiLayer.appendChild(panelRef.panel);
+  try {
+    panelRef.updateStats?.(engine.stats());
+  } catch {
+    /* diagnostics are optional */
+  }
 
   function backgroundFallbackLabel() {
     const labels = {

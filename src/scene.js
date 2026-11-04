@@ -2,6 +2,11 @@ import * as THREE from 'three';
 import { BackgroundLayer } from './scene/background.js';
 import { QUALITY, clamp, normalizeQuality } from './config.js';
 import { getTheme } from './presets.js';
+import {
+  ARTWORK_TEXTURE_EDGE,
+  makeImageTexture,
+  summarizeTextures,
+} from './texture.js';
 
 const IDLE_PAUSE_MS = 1400;
 
@@ -42,6 +47,8 @@ export class BackgroundEngine {
     this.modelEnabled = true;
     this.disposed = false;
     this.webFrame = null;
+    this.contextLost = false;
+    this.focused = typeof document === 'undefined' ? true : document.hasFocus();
 
     this.canvas = document.createElement('canvas');
     this.canvas.className = 'cxd-canvas';
@@ -50,7 +57,10 @@ export class BackgroundEngine {
     this.quality = QUALITY[normalizeQuality(this.config.quality)];
     this.renderer = new THREE.WebGLRenderer({
       canvas: this.canvas,
-      antialias: Boolean(this.quality.antialias),
+      // A fullscreen background quad has no geometric edges to smooth. MSAA
+      // cannot be toggled after context creation either, so leaving it off
+      // keeps every tier on the exact same shader/compositing path.
+      antialias: false,
       alpha: false,
       powerPreference: 'default',
       preserveDrawingBuffer: false,
@@ -90,8 +100,48 @@ export class BackgroundEngine {
         this.wake();
       }
     };
+    this._onBlur = () => {
+      this.focused = false;
+      if (this.config.pauseWhenUnfocused) this._cancel();
+    };
+    this._onFocus = () => {
+      this.focused = true;
+      this._last = 0;
+      this._lastRender = 0;
+      this._needsRepaint = true;
+      this.wake();
+    };
+    this._onContextLost = (event) => {
+      // Three.js already prevents the default so the context can be restored.
+      // Only stop our frame loop and remember the state.
+      this.contextLost = true;
+      this._cancel();
+      console.warn('[codex-bg] WebGL context lost');
+    };
+    this._onContextRestored = () => {
+      this.contextLost = false;
+      const mark = (texture) => {
+        if (texture && typeof texture === 'object') texture.needsUpdate = true;
+      };
+      mark(this.backgroundTexture);
+      this.scene.traverse((object) => {
+        const uniforms = object.material?.uniforms;
+        if (!uniforms) return;
+        Object.values(uniforms).forEach((uniform) => mark(uniform?.value));
+      });
+      this._last = 0;
+      this._lastRender = 0;
+      this.resize();
+      this._needsRepaint = true;
+      this.wake();
+      console.warn('[codex-bg] WebGL context restored');
+    };
     window.addEventListener('pointermove', this._onPointerMove, { passive: true });
     document.addEventListener('visibilitychange', this._onVisibility);
+    window.addEventListener('blur', this._onBlur);
+    window.addEventListener('focus', this._onFocus);
+    this.canvas.addEventListener('webglcontextlost', this._onContextLost, false);
+    this.canvas.addEventListener('webglcontextrestored', this._onContextRestored, false);
 
     this._resizeObserver = new ResizeObserver(() => this.resize());
     this._resizeObserver.observe(container);
@@ -169,20 +219,20 @@ export class BackgroundEngine {
 
   async ensureParticles() {
     if (this.particles) return this.particles;
-    if (this.mode === 'artwork' || !this.quality.particles) return null;
+    if (this.mode === 'artwork' || this.config.particles === false) return null;
     const { Particles } = await import('./scene/particles.js');
-    if (this.disposed || this.mode === 'artwork' || !this.quality.particles) return null;
+    if (this.disposed || this.mode === 'artwork' || this.config.particles === false) return null;
     this.particles = new Particles(this.scene);
-    this.particles.setDensity(this.quality.particleScale);
+    this.particles.setDensity(1);
     this.applyTheme(this.config.theme);
     return this.particles;
   }
 
   async ensurePost() {
     if (this.post) return this.post;
-    if (this.mode === 'artwork' || !this.quality.bloom) return null;
+    if (this.mode === 'artwork' || !(Number(this.config.bloom) > 0.005)) return null;
     const { PostFX } = await import('./post.js');
-    if (this.disposed || this.mode === 'artwork' || !this.quality.bloom) return null;
+    if (this.disposed || this.mode === 'artwork' || !(Number(this.config.bloom) > 0.005)) return null;
     this.post = new PostFX(
       this.renderer,
       this.scene,
@@ -262,8 +312,12 @@ export class BackgroundEngine {
 
   async setBackgroundImage(img) {
     this.disposeBackgroundTexture();
-    const texture = new THREE.Texture(img);
-    texture.needsUpdate = true;
+    const { texture } = makeImageTexture(img, {
+      renderer: this.renderer,
+      srgb: true,
+      flipY: true,
+      maxEdge: ARTWORK_TEXTURE_EDGE,
+    });
     this.background.setTexture(texture, img.width / img.height);
     this.backgroundTexture = texture;
     this.backgroundVideo = null;
@@ -447,7 +501,7 @@ export class BackgroundEngine {
     const qualityChanged = normalizeQuality(config.quality) !== normalizeQuality(this.config.quality);
     this.config = { ...config };
     if (qualityChanged) this.applyQuality();
-    if (this.post) this.post.setBloom(this.quality.bloom ? config.bloom : 0);
+    this.syncEffects();
     if (this.glow) {
       this.glow.material.uniforms.uStrength.value = 0.55 + config.bloom * 0.55;
       this.glow.position.x = config.modelX * 2.2;
@@ -477,34 +531,48 @@ export class BackgroundEngine {
   applyQuality() {
     const tier = QUALITY[normalizeQuality(this.config.quality)];
     this.quality = tier;
-    const dpr = Math.min(window.devicePixelRatio || 1, tier.dpr);
+    // Sampling is the only thing a quality tier changes. Do not clamp this to
+    // window.devicePixelRatio: on a 1x display every tier would collapse to the
+    // same buffer size, so "balanced"/"high" would only change the frame cap
+    // and the picture would never actually get sharper.
+    const dpr = Math.max(1, Number(tier.dpr) || 1);
     this.renderer.setPixelRatio(dpr);
     this.pixelRatio = dpr;
-    if (this.particles) {
-      this.particles.setDensity(tier.particles ? tier.particleScale : 0);
-    }
-    if (this.mode === 'procedural') {
-      // A session may boot on the saver tier and be raised to high later.
-      // Lazily create whatever the new tier needs instead of leaving the
-      // composer/particles permanently missing.
-      if (tier.particles && !this.particles) {
-        this.ensureParticles();
-      }
-      if (tier.bloom) {
-        this.ensurePost();
-      } else if (this.post) {
-        try {
-          this.post.dispose();
-        } catch {
-          /* ignore */
-        }
-        this.post = null;
-      }
-    }
-    if (this.post) this.post.setBloom(tier.bloom ? this.config.bloom : 0);
     this._needsRepaint = true;
     this.resize();
     this.wake();
+  }
+
+  /**
+   * Bloom and particles belong to the procedural demo, not to a wallpaper and
+   * not to a quality tier. Keeping them on their own switches means changing
+   * the sampling tier never rebuilds a composer or a particle system, so the
+   * picture does not jump or stutter while the user drags the setting.
+   */
+  syncEffects() {
+    if (this.mode !== 'procedural') return;
+    const wantPost = Number(this.config.bloom) > 0.005;
+    if (wantPost) {
+      this.ensurePost();
+    } else if (this.post) {
+      try {
+        this.post.dispose();
+      } catch {
+        /* ignore */
+      }
+      this.post = null;
+    }
+    if (this.post) this.post.setBloom(this.config.bloom);
+
+    const wantParticles = this.config.particles !== false;
+    if (wantParticles) {
+      // Density 0 is how a disabled particle layer is hidden. Re-enabling must
+      // restore the already-created system instead of merely skipping creation.
+      if (this.particles) this.particles.setDensity(1);
+      else this.ensureParticles();
+    } else if (this.particles) {
+      this.particles.setDensity(0);
+    }
   }
 
   resize() {
@@ -567,6 +635,7 @@ export class BackgroundEngine {
   _tick() {
     if (this.disposed || !this._running) return;
     if (document.hidden) return;
+    if (this.contextLost) return;
 
     const now = performance.now();
     const interval = 1000 / (this.quality.fps || 60);
@@ -592,6 +661,10 @@ export class BackgroundEngine {
    */
   _shouldContinue(now) {
     if (document.hidden) return false;
+    // Always allow the first frame to paint even if the window is not focused
+    // yet (embedded/injected pages can load in the background).
+    if (!this.focused && this.config.pauseWhenUnfocused && !this._needsRepaint) return false;
+    if (this.contextLost) return false;
     if (!this._needsRepaint && this.mode === 'artwork' && this.artworkKind === 'image' && this.config.idlePause) {
       return now - this._lastPointer < IDLE_PAUSE_MS;
     }
@@ -612,7 +685,7 @@ export class BackgroundEngine {
       if (this.model && this.modelEnabled) {
         this.model.update(dt, this.time, this.mouse, this.config);
       }
-      if (this.particles && this.quality.particles) {
+      if (this.particles && this.config.particles !== false) {
         this.particles.update(this.time, this.pixelRatio, this.config);
       }
       if (this.glow) {
@@ -644,17 +717,39 @@ export class BackgroundEngine {
   }
 
   stats() {
+    const buffer = this.renderer?.getDrawingBufferSize?.(new THREE.Vector2());
+    const textures = this.mode === 'procedural'
+      ? []
+      : this.background.sceneMaterial?.textures?.length
+        ? this.background.sceneMaterial.textures
+        : this.backgroundTexture
+          ? [this.backgroundTexture]
+          : [];
+    const textureStats = summarizeTextures(textures);
+    const memory = this.renderer?.info?.memory;
     return {
       fps: this.fps,
       tier: normalizeQuality(this.config.quality),
       dpr: this.pixelRatio || 1,
+      bufferWidth: buffer?.x || 0,
+      bufferHeight: buffer?.y || 0,
+      cssWidth: this.width || 0,
+      cssHeight: this.height || 0,
       mode: this.mode,
       artwork: this.artworkKind,
-      antialias: Boolean(this.quality.antialias),
+      antialias: Boolean(this.renderer.getContext()?.getContextAttributes?.()?.antialias),
       bloom: Boolean(this.post),
-      particles: Boolean(this.particles && this.quality.particles),
+      particles: Boolean(this.particles && this.config.particles !== false),
       model: Boolean(this.model),
       drawCalls: this.renderer.info?.render?.calls ?? 0,
+      geometries: memory?.geometries ?? 0,
+      programs: this.renderer.info?.programs?.length ?? 0,
+      triangles: this.renderer.info?.render?.triangles ?? 0,
+      points: this.renderer.info?.render?.points ?? 0,
+      maxTextureSize: this.renderer.capabilities?.maxTextureSize ?? 0,
+      contextLost: this.contextLost,
+      focused: this.focused,
+      ...textureStats,
     };
   }
 
@@ -665,6 +760,10 @@ export class BackgroundEngine {
     this._cancel();
     window.removeEventListener('pointermove', this._onPointerMove);
     document.removeEventListener('visibilitychange', this._onVisibility);
+    window.removeEventListener('blur', this._onBlur);
+    window.removeEventListener('focus', this._onFocus);
+    this.canvas.removeEventListener('webglcontextlost', this._onContextLost);
+    this.canvas.removeEventListener('webglcontextrestored', this._onContextRestored);
     this._resizeObserver.disconnect();
     this.disposeBackgroundTexture();
     this.model?.dispose?.();

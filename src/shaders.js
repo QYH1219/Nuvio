@@ -39,12 +39,29 @@ export const backgroundFragment = /* glsl */ `
     return uv;
   }
 
+  /* contain: keep the whole artwork, undistorted, with letterbox bars. */
+  vec2 containUv(vec2 uv) {
+    float sa = uScreenAspect;
+    float ia = uImageAspect;
+    if (sa > ia) {
+      uv.x = (uv.x - 0.5) * (sa / ia) + 0.5;
+    } else {
+      uv.y = (uv.y - 0.5) * (ia / sa) + 0.5;
+    }
+    return uv;
+  }
+
   void main() {
     float t = uTime;
     vec2 uv = vUv;
+    float bars = 0.0;
 
     float breath = 1.0 + 0.010 * sin(t * 0.11) * uMotion;
-    if (uFitMode > 0.5) {
+    if (uFitMode > 1.5) {
+      // contain: full artwork, no crop, geometry stays fixed.
+      uv = containUv(uv);
+      bars = step(uv.x, 0.0) + step(1.0, uv.x) + step(uv.y, 0.0) + step(1.0, uv.y);
+    } else if (uFitMode > 0.5) {
       // stretch: every source pixel must stay visible, so sample the plain
       // [0,1] square and skip the zoom/drift that would crop the edges.
       uv = clamp(uv, 0.0, 1.0);
@@ -79,6 +96,7 @@ export const backgroundFragment = /* glsl */ `
 
     float g = hash(vUv * vec2(1920.0, 1080.0) + fract(t) * 91.0) - 0.5;
     col += g * 0.030 * uGrain;
+    col = mix(col, vec3(0.012, 0.020, 0.035), clamp(bars, 0.0, 1.0));
 
     gl_FragColor = vec4(col, 1.0);
     #include <tonemapping_fragment>
@@ -256,12 +274,22 @@ const SCENE_HEADER = /* glsl */ `
     return uv;
   }
 
+  vec2 containUv(vec2 uv, float screenAspect, float imageAspect) {
+    if (screenAspect > imageAspect) {
+      uv.x = (uv.x - 0.5) * (screenAspect / imageAspect) + 0.5;
+    } else {
+      uv.y = (uv.y - 0.5) * (imageAspect / screenAspect) + 0.5;
+    }
+    return uv;
+  }
+
   /*
    * fit=cover crops the artwork to the window; fit=stretch keeps every pixel
    * and lets the aspect ratio follow the window. The default scene wallpaper
    * uses stretch so the whole illustration stays visible inside Codex.
    */
   vec2 fitUv(vec2 uv) {
+    if (uFitMode > 1.5) return containUv(uv, uScreenAspect, uImageAspect);
     return uFitMode > 0.5 ? uv : coverUv(uv, uScreenAspect, uImageAspect);
   }
 `;
@@ -564,6 +592,14 @@ ${flowCode.join('\n')}
     vec3 col = texture2D(uTex, warpedUv).rgb;
 ${flowBody || '    // no flow composites'}
     col *= 1.0 - uDim * 0.62;
+
+    // contain: flat letterbox instead of smearing the clamped edge pixels.
+    float inside = 1.0;
+    if (uFitMode > 1.5) {
+      inside = step(0.0, sceneUv.x) * step(sceneUv.x, 1.0) *
+               step(0.0, sceneUv.y) * step(sceneUv.y, 1.0);
+    }
+    col = mix(vec3(0.012, 0.020, 0.035), col, inside);
 
     gl_FragColor = vec4(col, 1.0);
     #include <tonemapping_fragment>

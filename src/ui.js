@@ -1,4 +1,4 @@
-import { QUALITY, QUALITY_ORDER } from './config.js';
+import { DEFAULTS, QUALITY, QUALITY_ORDER } from './config.js';
 import { getAutostart, hasWorkshopApi, setAutostart } from './workshop.js';
 import { createWorkshopSection } from './panel/workshop.js';
 
@@ -32,12 +32,13 @@ const SECTIONS = [
         label: '填充方式',
         when: 'artwork',
         options: [
-          ['auto', '跟随原图'],
+          ['auto', '自动'],
           ['cover', '裁剪铺满'],
+          ['contain', '完整显示'],
           ['stretch', '拉伸铺满'],
         ],
       },
-      { type: 'range', key: 'surfaceOpacity', label: '界面不透明度', min: 0, max: 1, step: 0.01 },
+      { type: 'range', key: 'surfaceOpacity', label: '界面磨砂强度', min: 0, max: 1, step: 0.01 },
       { type: 'range', key: 'dim', label: '背景压暗', min: 0, max: 0.8, step: 0.01 },
       { type: 'range', key: 'vignette', label: '暗角', min: 0, max: 1, step: 0.01 },
     ],
@@ -54,6 +55,7 @@ const SECTIONS = [
       },
       { type: 'toggle', key: 'autoQuality', label: '卡顿时自动降档' },
       { type: 'toggle', key: 'idlePause', label: '静态壁纸停帧' },
+      { type: 'toggle', key: 'pauseWhenUnfocused', label: '窗口失焦时暂停' },
       { type: 'range', key: 'motion', label: '动态强度', min: 0, max: 2, step: 0.01 },
       { type: 'range', key: 'parallax', label: '鼠标视差', min: 0, max: 2, step: 0.01 },
     ],
@@ -63,11 +65,13 @@ const SECTIONS = [
     title: '高级',
     controls: [
       { type: 'range', key: 'bloom', label: '辉光强度', min: 0, max: 2, step: 0.01, when: 'procedural' },
+      { type: 'toggle', key: 'particles', label: '粒子', when: 'procedural' },
       { type: 'range', key: 'grain', label: '颗粒质感', min: 0, max: 1.5, step: 0.01 },
       { type: 'range', key: 'sceneShake', label: '场景抖动', min: 0, max: 2, step: 0.01, when: 'scene' },
       { type: 'range', key: 'sceneSway', label: '场景摇摆', min: 0, max: 2, step: 0.01, when: 'scene' },
       { type: 'range', key: 'sceneWater', label: '水面动效', min: 0, max: 2, step: 0.01, when: 'scene' },
       { type: 'model' },
+      { type: 'diagnostics' },
     ],
   },
   {
@@ -193,10 +197,59 @@ export function createPanel(config, handlers = {}, options = {}) {
     const wrap = document.createElement('section');
     wrap.className = 'cxd-section';
     wrap.dataset.section = section.id;
-    const sectionTitle = document.createElement('div');
+    // Sections collapse so the long "高级" block no longer pushes 系统 out of
+    // reach. State is per session and starts collapsed for the block most
+    // users never touch.
+    const head = document.createElement('div');
+    head.className = 'cxd-section-head';
+    const sectionTitle = document.createElement('button');
+    sectionTitle.type = 'button';
     sectionTitle.className = 'cxd-section-title';
-    sectionTitle.textContent = section.title;
-    wrap.appendChild(sectionTitle);
+    sectionTitle.setAttribute('aria-expanded', 'true');
+    const titleText = document.createElement('span');
+    titleText.textContent = section.title;
+    const chevron = document.createElement('span');
+    chevron.className = 'cxd-section-chevron';
+    chevron.setAttribute('aria-hidden', 'true');
+    chevron.textContent = '›';
+    sectionTitle.append(titleText, chevron);
+    head.appendChild(sectionTitle);
+
+    const sectionKeys = section.controls.map((control) => control.key).filter(Boolean);
+    if (sectionKeys.length) {
+      const sectionReset = document.createElement('button');
+      sectionReset.type = 'button';
+      sectionReset.className = 'cxd-section-reset';
+      sectionReset.textContent = '↺';
+      sectionReset.title = `重置「${section.title}」`;
+      sectionReset.setAttribute('aria-label', `重置${section.title}分区`);
+      sectionReset.addEventListener('click', () => {
+        sectionKeys.forEach((key) => {
+          if (key in DEFAULTS) config[key] = DEFAULTS[key];
+        });
+        sync();
+        onChange(config);
+        flash(`${section.title}已恢复默认`);
+      });
+      head.appendChild(sectionReset);
+    }
+    wrap.appendChild(head);
+
+    const sectionBody = document.createElement('div');
+    sectionBody.className = 'cxd-section-body';
+    sectionBody.id = `cxd-sec-${section.id}`;
+    sectionTitle.setAttribute('aria-controls', sectionBody.id);
+    wrap.appendChild(sectionBody);
+
+    const setCollapsed = (collapsed) => {
+      wrap.dataset.collapsed = collapsed ? 'true' : 'false';
+      sectionTitle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+      sectionBody.hidden = collapsed;
+    };
+    setCollapsed(section.id === 'advanced');
+    sectionTitle.addEventListener('click', () => {
+      setCollapsed(wrap.dataset.collapsed !== 'true');
+    });
 
     section.controls.forEach((control) => {
       if (control.type === 'workshop') {
@@ -207,12 +260,12 @@ export function createPanel(config, handlers = {}, options = {}) {
           },
           onMessage: (text) => flash(text),
         });
-        wrap.appendChild(workshop.el);
+        sectionBody.appendChild(workshop.el);
         return;
       }
 
       if (control.type === 'assets') {
-        wrap.appendChild(buildAssets());
+        sectionBody.appendChild(buildAssets());
         return;
       }
 
@@ -232,12 +285,17 @@ export function createPanel(config, handlers = {}, options = {}) {
         ];
         modelControls.forEach((spec) => group.appendChild(buildRange(spec)));
         gates.push({ when: 'model', el: group });
-        wrap.appendChild(group);
+        sectionBody.appendChild(group);
         return;
       }
 
       if (control.type === 'autostart') {
-        wrap.appendChild(buildAutostart());
+        sectionBody.appendChild(buildAutostart());
+        return;
+      }
+
+      if (control.type === 'diagnostics') {
+        sectionBody.appendChild(buildDiagnostics());
         return;
       }
 
@@ -249,6 +307,12 @@ export function createPanel(config, handlers = {}, options = {}) {
         label.textContent = control.label;
         const seg = document.createElement('div');
         seg.className = 'cxd-seg';
+        if (control.key === 'fit') {
+          // Four labels do not fit on one 322px line; a 2×2 grid keeps every
+          // option readable instead of wrapping characters vertically.
+          row.classList.add('cxd-row-stack');
+          seg.classList.add('cxd-seg-fit');
+        }
         control.options.forEach(([value, text]) => {
           const btn = document.createElement('button');
           btn.type = 'button';
@@ -262,8 +326,14 @@ export function createPanel(config, handlers = {}, options = {}) {
           seg.appendChild(btn);
         });
         row.append(label, seg);
-        wrap.appendChild(row);
-        refs[control.key] = { type: 'segment', el: seg };
+        sectionBody.appendChild(row);
+        let hintEl = null;
+        if (control.key === 'quality') {
+          hintEl = document.createElement('p');
+          hintEl.className = 'cxd-asset-hint';
+          sectionBody.appendChild(hintEl);
+        }
+        refs[control.key] = { type: 'segment', el: seg, hintEl };
         gate(control, row);
         return;
       }
@@ -283,14 +353,14 @@ export function createPanel(config, handlers = {}, options = {}) {
         const track = document.createElement('span');
         track.className = 'cxd-switch';
         row.append(text, input, track);
-        wrap.appendChild(row);
+        sectionBody.appendChild(row);
         refs[control.key] = { type: 'toggle', el: input };
         gate(control, row);
         return;
       }
 
       const row = buildRange(control);
-      wrap.appendChild(row);
+      sectionBody.appendChild(row);
       gate(control, row);
     });
 
@@ -388,6 +458,45 @@ export function createPanel(config, handlers = {}, options = {}) {
 
     group.append(row, hint);
     load();
+    return group;
+  }
+
+  /**
+   * Read-only runtime panel. Everything here comes from engine.stats(), so it
+   * answers the questions users actually ask: is the wallpaper being rendered
+   * at native size, how much VRAM are the textures eating, and why is a tier
+   * slower. It is deliberately not editable.
+   */
+  function buildDiagnostics() {
+    const group = document.createElement('div');
+    group.className = 'cxd-group cxd-diagnostics';
+    const title = document.createElement('div');
+    title.className = 'cxd-group-title';
+    title.textContent = '运行状态';
+    group.appendChild(title);
+
+    const grid = document.createElement('div');
+    grid.className = 'cxd-diag-grid';
+    const rows = {};
+    [
+      ['fps', '帧率'],
+      ['tier', '画质档位'],
+      ['buffer', '渲染缓冲'],
+      ['textures', '贴图 / 显存'],
+      ['draw', '绘制调用'],
+      ['scene', '背景类型'],
+    ].forEach(([key, label]) => {
+      const name = document.createElement('span');
+      name.className = 'cxd-diag-key';
+      name.textContent = label;
+      const value = document.createElement('span');
+      value.className = 'cxd-diag-value';
+      value.textContent = '—';
+      rows[key] = value;
+      grid.append(name, value);
+    });
+    group.appendChild(grid);
+    refs.diagnostics = { type: 'diagnostics', rows };
     return group;
   }
 
@@ -511,20 +620,20 @@ export function createPanel(config, handlers = {}, options = {}) {
   const reset = document.createElement('button');
   reset.type = 'button';
   reset.className = 'cxd-text-btn';
-  reset.textContent = '恢复默认';
+  reset.textContent = '全部重置';
   reset.addEventListener('click', () => onReset());
 
   const exportBtn = document.createElement('button');
   exportBtn.type = 'button';
-  exportBtn.className = 'cxd-text-btn';
-  exportBtn.textContent = '导出';
+  exportBtn.className = 'cxd-menu-item';
+  exportBtn.textContent = '导出配置';
   exportBtn.title = '导出当前配置为 JSON';
   exportBtn.addEventListener('click', exportConfig);
 
   const importBtn = document.createElement('button');
   importBtn.type = 'button';
-  importBtn.className = 'cxd-text-btn';
-  importBtn.textContent = '导入';
+  importBtn.className = 'cxd-menu-item';
+  importBtn.textContent = '导入配置';
   importBtn.title = '从 JSON 文件导入配置';
 
   const importInput = document.createElement('input');
@@ -549,14 +658,47 @@ export function createPanel(config, handlers = {}, options = {}) {
         onChange(config);
       }
       sync();
+      closeMenu();
       flash('配置已导入');
     } catch (error) {
       console.warn('[codex-bg] config import failed', error);
+      closeMenu();
       flash('导入失败');
     }
   });
 
-  actions.append(reset, exportBtn, importBtn, importInput);
+  // Export/import are low-frequency actions; keep them out of the footer row
+  // so the panel stops looking like a toolbar.
+  const moreBtn = document.createElement('button');
+  moreBtn.type = 'button';
+  moreBtn.className = 'cxd-text-btn cxd-more-btn';
+  moreBtn.textContent = '⋯';
+  moreBtn.title = '更多操作';
+  moreBtn.setAttribute('aria-haspopup', 'true');
+  moreBtn.setAttribute('aria-expanded', 'false');
+
+  const menu = document.createElement('div');
+  menu.className = 'cxd-foot-menu';
+  menu.hidden = true;
+  menu.append(exportBtn, importBtn);
+
+  const closeMenu = () => {
+    menu.hidden = true;
+    moreBtn.setAttribute('aria-expanded', 'false');
+  };
+  moreBtn.addEventListener('click', (event) => {
+    event.stopPropagation();
+    const open = menu.hidden;
+    menu.hidden = !open;
+    moreBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
+  document.addEventListener('pointerdown', (event) => {
+    if (menu.hidden) return;
+    if (event.target === moreBtn || menu.contains(event.target)) return;
+    closeMenu();
+  });
+
+  actions.append(reset, moreBtn, menu, importInput);
 
   const note = document.createElement('span');
   note.className = 'cxd-foot-note';
@@ -588,16 +730,23 @@ export function createPanel(config, handlers = {}, options = {}) {
     link.download = 'nuvio-config.json';
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
-    flash('配置已导出');
+    closeMenu();
+    flash('配置已导出（不含壁纸文件）');
   }
 
   function sync() {
     Object.entries(refs).forEach(([key, ref]) => {
-      if (ref.type === 'assets') return;
+      if (ref.type === 'assets' || ref.type === 'diagnostics') return;
       if (ref.type === 'segment') {
         [...ref.el.children].forEach((btn) => {
           btn.classList.toggle('on', btn.dataset.value === config[key]);
         });
+        if (ref.hintEl) {
+          const tier = QUALITY[config[key]];
+          ref.hintEl.textContent = tier
+            ? `${tier.hint} · 只影响清晰度与帧率，不改变构图`
+            : '';
+        }
       } else if (ref.type === 'toggle') {
         ref.el.checked = Boolean(config[key]);
       } else {
@@ -605,6 +754,35 @@ export function createPanel(config, handlers = {}, options = {}) {
         ref.value.textContent = fmt(config[key], ref.step);
       }
     });
+  }
+
+  function formatBytes(bytes) {
+    const value = Number(bytes) || 0;
+    if (value >= 1024 * 1024 * 1024) return `${(value / 1024 ** 3).toFixed(1)} GB`;
+    if (value >= 1024 * 1024) return `${(value / 1024 ** 2).toFixed(1)} MB`;
+    if (value >= 1024) return `${Math.round(value / 1024)} KB`;
+    return `${value} B`;
+  }
+
+  /** Feed engine.stats() into the read-only diagnostics block. */
+  function updateStats(stats) {
+    const ref = refs.diagnostics;
+    if (!ref || !stats) return;
+    ref.rows.fps.textContent = `${stats.fps || 0} FPS`;
+    ref.rows.tier.textContent = `${QUALITY[stats.tier]?.label || stats.tier} · ${Number(stats.dpr || 1).toFixed(2)}×`;
+    ref.rows.buffer.textContent = `${stats.bufferWidth || 0}×${stats.bufferHeight || 0}`;
+    ref.rows.textures.textContent = `${stats.textureCount || 0} 张 · ${formatBytes(stats.textureBytes)}`;
+    ref.rows.draw.textContent = `${stats.drawCalls || 0} calls · ${stats.triangles || 0} tris`;
+    const kind = stats.mode === 'procedural'
+      ? '程序化'
+      : stats.artwork === 'scene'
+        ? 'Wallpaper Engine 场景'
+        : stats.artwork === 'web'
+          ? '网页壁纸'
+          : stats.artwork === 'video'
+            ? '视频'
+            : '图片';
+    ref.rows.scene.textContent = `${kind}${stats.textureDownscaled ? ' · 已降采样' : ''}`;
   }
 
   function chooseFile(slot, labelEl) {
@@ -641,6 +819,7 @@ export function createPanel(config, handlers = {}, options = {}) {
   return {
     panel,
     sync,
+    updateStats,
     fps,
     refreshAssets,
     refreshWorkshop: () => workshop?.refresh?.(),
