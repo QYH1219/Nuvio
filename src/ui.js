@@ -15,6 +15,7 @@ const SECTIONS = [
       { type: 'range', key: 'bloom', label: '辉光强度', min: 0, max: 2, step: 0.01 },
       { type: 'range', key: 'grain', label: '颗粒质感', min: 0, max: 1.5, step: 0.01 },
       { type: 'range', key: 'dim', label: '背景压暗', min: 0, max: 0.8, step: 0.01 },
+      { type: 'range', key: 'vignette', label: '暗角强度', min: 0, max: 1, step: 0.01 },
     ],
   },
   {

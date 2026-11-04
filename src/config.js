@@ -1,4 +1,5 @@
-const STORAGE_KEY = 'codex-dynamic-bg:v1';
+// v2: brighter defaults (lower dim / panel alpha) and the new vignette control.
+const STORAGE_KEY = 'codex-dynamic-bg:v2';
 
 export const DEFAULTS = {
   quality: 'high',
@@ -6,7 +7,8 @@ export const DEFAULTS = {
   parallax: 1,
   bloom: 0.85,
   grain: 0.55,
-  dim: 0.22,
+  dim: 0.12,
+  vignette: 0.45,
   modelScale: 1,
   modelSpin: 0.35,
   modelX: 0.18,
@@ -15,7 +17,7 @@ export const DEFAULTS = {
   sceneSway: 1,
   particles: true,
   codexMock: true,
-  surfaceOpacity: 0.45,
+  surfaceOpacity: 0.22,
   showPanel: false,
 };
 

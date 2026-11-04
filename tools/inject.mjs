@@ -35,6 +35,8 @@ function parseArgs(argv) {
     target: '',
     image: '',
     model: '',
+    surface: null,
+    dim: null,
     assetBase: '',
     reload: true,
     serve: true,
@@ -57,6 +59,8 @@ function parseArgs(argv) {
     else if (arg === '--target') options.target = next();
     else if (arg === '--image') options.image = next();
     else if (arg === '--model') options.model = next();
+    else if (arg === '--surface') options.surface = Number(next());
+    else if (arg === '--dim') options.dim = Number(next());
     else if (arg === '--asset-base') options.assetBase = next();
     else if (arg === '--no-reload') options.reload = false;
     else if (arg === '--no-serve') options.serve = false;
@@ -83,6 +87,8 @@ Options:
   --target TEXT        page target id/title/url substring
   --image URL          explicit background URL or /assets/... path
   --model URL          explicit GLB/glTF URL or /assets/... path
+  --surface NUMBER     Codex panel opacity, 0..1 (default 0.22; lower = clearer background)
+  --dim NUMBER         background dim, 0..1 (default 0.12)
   --asset-base URL     override the asset base URL
   --no-reload          inject into the current document without reloading
   --no-serve           do not start the local asset server
@@ -338,8 +344,23 @@ async function main() {
     imageUrl: withAssetBase(options.image, assetBase),
     modelUrl: withAssetBase(options.model, assetBase),
   };
+  const overrides = {};
+  if (Number.isFinite(options.surface)) {
+    overrides.surfaceOpacity = Math.min(1, Math.max(0, options.surface));
+  }
+  if (Number.isFinite(options.dim)) {
+    overrides.dim = Math.min(1, Math.max(0, options.dim));
+  }
   const prelude = `
 (() => {
+  const overrides = ${JSON.stringify(overrides)};
+  if (Object.keys(overrides).length) {
+    const key = 'codex-dynamic-bg:v2';
+    let config = {};
+    try { config = JSON.parse(localStorage.getItem(key) || '{}') || {}; } catch {}
+    Object.assign(config, overrides);
+    try { localStorage.setItem(key, JSON.stringify(config)); } catch {}
+  }
   window.__CXD_ASSET_BASE__ = ${JSON.stringify(assetBase)};
   window.__CXD_ASSETS__ = ${JSON.stringify(explicitAssets)};
   document.documentElement.dataset.cxdBackground = 'on';

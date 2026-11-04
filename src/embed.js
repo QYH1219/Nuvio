@@ -2,16 +2,39 @@ import css from './style.css?inline';
 import { mount } from './mount.js';
 
 const CXD_CODEX_CSS = String.raw`
-html[data-cxd-background] body {
+html[data-cxd-background],
+html[data-cxd-background] body,
+html[data-cxd-background] #root {
   isolation: isolate;
   background-color: transparent !important;
+}
+
+html[data-cxd-background] body main {
+  background-color: transparent !important;
+  background-image: none !important;
+}
+
+/* Codex applies a frosted-glass blur to its shell; with a wallpaper behind it
+   that reads as "muddy" and hides the artwork. Keep the tint, drop the blur. */
+html[data-cxd-background] body,
+html[data-cxd-background] body :is(
+  main.main-surface,
+  [data-app-shell-main-surface="default"],
+  aside.app-shell-left-panel,
+  aside[data-testid="app-shell-floating-left-panel"].bg-surface,
+  aside[data-app-shell-focus-area="right-panel"],
+  [data-app-shell-header-edge-scroll],
+  .thread-scroll-container[data-app-action-timeline-scroll]
+) {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
 }
 
 html[data-cxd-background] body :is(
   main.main-surface,
   [data-app-shell-main-surface="default"]
 ) {
-  background-color: var(--cxd-ui-surface, rgba(9, 13, 17, 0.48)) !important;
+  background-color: var(--cxd-ui-surface, rgba(9, 13, 17, 0.22)) !important;
 }
 
 html[data-cxd-background] body :is(
@@ -19,7 +42,7 @@ html[data-cxd-background] body :is(
   aside[data-testid="app-shell-floating-left-panel"].bg-surface,
   aside[data-app-shell-focus-area="right-panel"]
 ) {
-  background-color: var(--cxd-ui-surface-strong, rgba(12, 17, 21, 0.66)) !important;
+  background-color: var(--cxd-ui-surface-strong, rgba(12, 17, 21, 0.3)) !important;
 }
 
 html[data-cxd-background] body :is(
@@ -94,8 +117,8 @@ disposeExisting();
 
 const html = document.documentElement;
 html.dataset.cxdBackground = 'on';
-html.style.setProperty('--cxd-ui-surface', 'rgba(9, 13, 17, 0.48)');
-html.style.setProperty('--cxd-ui-surface-strong', 'rgba(12, 17, 21, 0.66)');
+html.style.setProperty('--cxd-ui-surface', 'rgba(9, 13, 17, 0.22)');
+html.style.setProperty('--cxd-ui-surface-strong', 'rgba(12, 17, 21, 0.3)');
 
 let host = document.getElementById('cxd-bg-root');
 if (!host) {

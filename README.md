@@ -206,6 +206,8 @@ npm run inject
 --target TEXT        按 target id / 标题 / URL 子串选择页面
 --image URL          指定背景图（URL 或 /assets/... 路径）
 --model URL          指定模型（URL 或 /assets/... 路径）
+--surface NUMBER     面板不透明度 0..1（默认 0.22，越低背景越清晰）
+--dim NUMBER         背景压暗 0..1（默认 0.12）
 --asset-base URL     覆盖素材 base URL
 --no-reload          注入到当前文档，不刷新
 --no-serve           不启动本地素材服务器
@@ -239,7 +241,8 @@ npm run inject -- --no-serve --asset-base https://cdn.example.com/bg/
 | `parallax` | `1` | 鼠标视差强度 |
 | `bloom` | `0.85` | Bloom 强度 |
 | `grain` | `0.55` | 胶片颗粒 |
-| `dim` | `0.22` | 背景压暗 |
+| `dim` | `0.12` | 背景压暗 |
+| `vignette` | `0.45` | 暗角强度 |
 | `modelScale` | `1` | 模型整体缩放 |
 | `modelSpin` | `0.35` | 模型自转速度 |
 | `modelX` / `modelY` | `0.18` / `-0.02` | 模型屏幕位置偏移 |
@@ -247,7 +250,7 @@ npm run inject -- --no-serve --asset-base https://cdn.example.com/bg/
 | `sceneSway` | `1` | 场景壁纸植被摆动强度 |
 | `particles` | `true` | 粒子开关 |
 | `codexMock` | `true` | 预览站是否显示 mock 界面 |
-| `surfaceOpacity` | `0.45` | Codex 面板透明度基准 |
+| `surfaceOpacity` | `0.22` | Codex 面板透明度基准（注入时实时生效） |
 | `showPanel` | `false` | 设置面板是否展开 |
 
 ## JavaScript API
@@ -328,6 +331,7 @@ Tripo 导出的 GLB 通常可以直读。建议导出时：
 - 注入只对当前 Codex 进程有效，重启后需要重新执行 `npm run inject`。
 - CDP 端口只应绑定在 `127.0.0.1`，不要暴露到局域网。
 - 高画质 + 4K 背景 + 大模型会明显吃 GPU；卡顿时先降 `quality`，再关粒子。
+- 背景发灰/看不清：注入时用 `--surface 0.15 --dim 0.05` 调低面板遮罩和压暗；面板越透明，背景越清晰，文字对比度会同步下降，按自己屏幕微调。
 - Linux / macOS 的 Codex 安装路径与进程名不同，`launch-codex.sh` 需要按实际环境改。
 
 ## 隐私

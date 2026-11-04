@@ -174,6 +174,8 @@ What happens:
 --target TEXT        match a page target by id / title / URL substring
 --image URL          explicit background URL or /assets/... path
 --model URL          explicit model URL or /assets/... path
+--surface NUMBER     panel opacity, 0..1 (default 0.22; lower = clearer artwork)
+--dim NUMBER         background dim, 0..1 (default 0.12)
 --asset-base URL     override the asset base URL
 --no-reload          inject without reloading
 --no-serve           do not start the local asset server
@@ -198,7 +200,8 @@ Stored in `localStorage` under `codex-dynamic-bg:v1`:
 | `parallax` | `1` | Mouse parallax |
 | `bloom` | `0.85` | Bloom strength |
 | `grain` | `0.55` | Film grain |
-| `dim` | `0.22` | Background dimming |
+| `dim` | `0.12` | Background dimming |
+| `vignette` | `0.45` | Vignette strength |
 | `modelScale` | `1` | Model scale |
 | `modelSpin` | `0.35` | Model rotation speed |
 | `modelX` / `modelY` | `0.18` / `-0.02` | Model screen offset |
@@ -206,7 +209,7 @@ Stored in `localStorage` under `codex-dynamic-bg:v1`:
 | `sceneSway` | `1` | Scene wallpaper foliage sway strength |
 | `particles` | `true` | Particle toggle |
 | `codexMock` | `true` | Mock shell in preview |
-| `surfaceOpacity` | `0.45` | Panel opacity baseline |
+| `surfaceOpacity` | `0.22` | Codex panel opacity (live in injection mode) |
 | `showPanel` | `false` | Settings panel state |
 
 ## JavaScript API
@@ -239,6 +242,7 @@ docs/           architecture, injection, asset docs
 - Injection lives only for the current Codex process.
 - Keep the CDP port bound to `127.0.0.1`.
 - 4K artwork plus large models can be GPU-heavy; lower `quality` first.
+- Washed-out artwork: inject with `--surface 0.15 --dim 0.05`. Lower panel opacity makes the background clearer at the cost of text contrast.
 - Linux/macOS launcher paths and process names may need adjustment.
 
 ## Privacy

@@ -35,7 +35,7 @@ export class PostFX {
   update(time, config) {
     this.grade.uniforms.uTime.value = time;
     this.grade.uniforms.uGrain.value = config.grain;
-    this.grade.uniforms.uVignette.value = 1;
+    this.grade.uniforms.uVignette.value = Number.isFinite(config.vignette) ? config.vignette : 0.45;
     this.grade.uniforms.uAberration.value = config.parallax * 0.8;
   }
 

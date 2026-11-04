@@ -1,4 +1,4 @@
-import { loadConfig, saveConfig, resetConfig } from './config.js';
+import { clamp, loadConfig, saveConfig, resetConfig } from './config.js';
 import {
   probeAssets,
   loadImage,
@@ -227,9 +227,20 @@ export async function mount(host, options = {}) {
 
   function applyVisibility() {
     mock.style.display = config.codexMock && !embed ? '' : 'none';
-    const surface = Number(config.surfaceOpacity ?? 0.55);
-    mock.style.setProperty('--cxd-surface-top', (0.54 * surface).toFixed(3));
-    mock.style.setProperty('--cxd-surface-bottom', (0.84 * surface).toFixed(3));
+    const surface = clamp(Number(config.surfaceOpacity ?? 0.22), 0, 1);
+    if (embed) {
+      // Real Codex panels read these custom properties from CXD_CODEX_CSS.
+      const doc = document.documentElement;
+      doc.style.setProperty('--cxd-ui-surface', `rgba(9, 13, 17, ${surface.toFixed(3)})`);
+      doc.style.setProperty(
+        '--cxd-ui-surface-strong',
+        `rgba(12, 17, 21, ${Math.min(1, surface * 1.35).toFixed(3)})`,
+      );
+    } else {
+      // Mirror the real Codex panel alphas so the preview matches injection.
+      mock.style.setProperty('--cxd-surface-top', surface.toFixed(3));
+      mock.style.setProperty('--cxd-surface-bottom', Math.min(1, surface * 1.35).toFixed(3));
+    }
     hud.style.display = config.codexMock && !embed ? 'none' : '';
     if (panelRef) panelRef.panel.dataset.open = String(Boolean(config.showPanel));
   }
