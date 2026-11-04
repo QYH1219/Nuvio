@@ -47,7 +47,7 @@
 ## 快速开始
 
 ```bash
-git clone https://github.com/QuisVic/QYH1219.git
+git clone https://github.com/QYH1219/QYH1219.git
 cd QYH1219
 npm install
 npm run dev
@@ -118,7 +118,7 @@ npm run restart -- --dry-run        # 只看它会做什么，不动进程
 仓库自带 `.github/workflows/pages.yml`。在 GitHub 仓库的 **Settings → Pages → Build and deployment** 里把 Source 设为 **GitHub Actions**，之后 push 到 `main` 就会自动构建并部署预览站：
 
 ```text
-https://quisvic.github.io/QYH1219/
+https://qyh1219.github.io/QYH1219/
 ```
 
 在线预览没有你本地的素材，会使用程序化背景和占位水晶模型；它主要用于展示交互和主题，不会暴露 `public/assets/`。

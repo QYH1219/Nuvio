@@ -47,7 +47,7 @@ An interactive WebGL background layer for Codex Desktop: custom artwork, Tripo G
 ## Quick start
 
 ```bash
-git clone https://github.com/QuisVic/QYH1219.git
+git clone https://github.com/QYH1219/QYH1219.git
 cd QYH1219
 npm install
 npm run dev
@@ -107,7 +107,7 @@ Themes and readability presets are no longer exposed: once a wallpaper is active
 The repository ships `.github/workflows/pages.yml`. Set **Settings → Pages → Build and deployment → Source** to **GitHub Actions**; every push to `main` then builds and deploys:
 
 ```text
-https://quisvic.github.io/QYH1219/
+https://qyh1219.github.io/QYH1219/
 ```
 
 The hosted preview has no local assets, so it uses the procedural background and placeholder crystal. It only demonstrates interaction and themes; `public/assets/` is never uploaded.
