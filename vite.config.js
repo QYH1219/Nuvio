@@ -1,6 +1,9 @@
 import { defineConfig } from 'vite';
+import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { stripPrivateAssets } from './tools/private-assets.mjs';
+
+const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'));
 
 /**
  * Vite copies the whole public directory into the output. The wallpaper
@@ -30,6 +33,9 @@ export default defineConfig(({ mode }) => {
 
   return {
     base: './',
+    define: {
+      __NUVIO_VERSION__: JSON.stringify(pkg.version),
+    },
     plugins: [privateAssetGuard(embed)],
     server: { host: '127.0.0.1', port: 5273, strictPort: true },
     build: embed

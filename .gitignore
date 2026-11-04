@@ -25,3 +25,7 @@ npm-debug.log*
 # Local screenshots that are not part of the docs
 .shots/
 
+# Local runtime state, logs and exported wallpaper bundles
+.nuvio/
+exports/
+

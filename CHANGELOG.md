@@ -2,6 +2,46 @@
 
 All notable changes to this project are documented here.
 
+## [0.4.1] - 2026-11-04
+
+### Added
+
+- `.nuvio.zip` wallpaper bundles: `npm run bundle -- export` packages the
+  active wallpaper, scene/mask files, library entries and panel config into a
+  single portable file; `npm run bundle -- import <file>` restores it and
+  applies the config through the resident injector.
+- Portable release package: `npm run pack` produces
+  `dist/nuvio-<version>-portable.zip` with no `npm install` required.
+- Login autostart without administrator rights:
+  `npm run autostart -- enable|disable|status`.
+- Version number in the HUD/panel plus a silent update check on startup
+  (disable with `NUVIO_NO_UPDATE_CHECK=1`).
+- GitHub Actions release workflow: pushing a `v*` tag builds, tests, packs and
+  publishes the portable zip.
+- Injector control endpoints `GET/POST /config` and `POST /reload`, used by
+  bundle import and external tooling.
+- The resident injector now polls for a Codex target every 2.5 s and
+  reconnects/re-registers automatically after Codex restarts.
+
+### Changed
+
+- `npm start` no longer restarts a running Codex by default. It asks first;
+  `--yes` accepts, `--restart` restarts automatically, `--no-restart` keeps
+  the current window.
+- The resident injector is detached and hidden by default. Use
+  `--foreground` for the old attached console.
+- `npm run restore` backs up the current config to
+  `.nuvio/backups/config-<timestamp>.json` before clearing it.
+
+### Fixed
+
+- `npm run doctor` could pick the spotlight/other page instead of the Codex
+  window; target selection now uses the shared score function.
+- Orphan launcher windows are cleaned up safely, and a lock file prevents
+  duplicate injectors.
+- Remaining `codex-dynamic-bg` strings in user-facing `use` / `wallpaper`
+  output now say Nuvio.
+
 ## [0.4.0] - 2026-11-04
 
 ### Added

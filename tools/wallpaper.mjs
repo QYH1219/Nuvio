@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Import a Wallpaper Engine wallpaper into codex-dynamic-bg.
+ * Import a Wallpaper Engine wallpaper into Nuvio.
  *
  *   node tools/wallpaper.mjs --current
  *   node tools/wallpaper.mjs "D:\steam\steamapps\workshop\content\431960\3806385218"
@@ -35,7 +35,7 @@ const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.webp']);
 const WORKSHOP_APP_ID = '431960';
 
 function usage() {
-  console.log(`codex-dynamic-bg wallpaper importer
+  console.log(`Nuvio wallpaper importer
 
 Usage:
   node tools/wallpaper.mjs --current

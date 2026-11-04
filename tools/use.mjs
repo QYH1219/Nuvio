@@ -65,7 +65,7 @@ function parseArgs(argv) {
 
 function printHelp() {
   console.log(`
-codex-dynamic-bg asset installer
+Nuvio asset installer
 
 Usage:
   npm run use -- <file-or-folder> [options]

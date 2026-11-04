@@ -1,7 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import {
+  appendFileSync,
+  closeSync,
   createReadStream,
   existsSync,
+  mkdirSync,
+  openSync,
   readFileSync,
   statSync,
   unlinkSync,
@@ -25,6 +29,8 @@ import { findEntry } from './workshop-scan.mjs';
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const DEFAULT_BUNDLE = join(ROOT, 'dist-embed', 'codex-dynamic-bg.iife.js');
 const STATE_FILE = join(ROOT, '.cxd-inject.json');
+const LOCK_FILE = join(ROOT, '.nuvio', 'injector.lock');
+const LOG_FILE = join(ROOT, '.nuvio', 'injector.log');
 
 const MIME = {
   '.avif': 'image/avif',
@@ -68,6 +74,7 @@ function parseArgs(argv) {
     serve: true,
     wait: 0,
     once: false,
+    daemon: false,
     list: false,
     help: false,
   };
@@ -103,6 +110,7 @@ function parseArgs(argv) {
       options.wait = value;
     }
     else if (arg === '--once') options.once = true;
+    else if (arg === '--daemon') options.daemon = true;
     else if (arg === '--list') options.list = true;
     else if (arg === '--help' || arg === '-h') options.help = true;
     else throw new Error(`unknown option: ${arg}`);
@@ -136,6 +144,7 @@ Options:
   --no-serve           do not start the local asset server
   --wait SECONDS       wait for the CDP port instead of failing immediately
   --once               exit after injecting instead of staying resident
+  --daemon             keep running without a console; log to .nuvio/injector.log
   --list               list CDP page targets and exit
   -h, --help           show this help
 
@@ -151,6 +160,88 @@ Press Ctrl+C to stop it, or run npm run restore in another terminal.
 
 function sleep(ms) {
   return new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
+}
+
+function processAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * One resident injector per checkout. The lock is advisory: a stale pid (or a
+ * lock left behind by a crashed start) is replaced instead of blocking the
+ * user forever.
+ */
+function acquireLock() {
+  try {
+    mkdirSync(join(ROOT, '.nuvio'), { recursive: true });
+    const fd = openSync(LOCK_FILE, 'wx');
+    writeFileSync(fd, `${process.pid}\n`);
+    closeSync(fd);
+    return true;
+  } catch (error) {
+    if (error.code !== 'EEXIST') throw error;
+    let pid = 0;
+    try {
+      pid = Number(readFileSync(LOCK_FILE, 'utf8').trim());
+    } catch {
+      /* unreadable lock */
+    }
+    if (processAlive(pid) && pid !== process.pid) return false;
+    writeFileSync(LOCK_FILE, `${process.pid}\n`);
+    return true;
+  }
+}
+
+function releaseLock() {
+  try {
+    const pid = Number(readFileSync(LOCK_FILE, 'utf8').trim());
+    if (pid === process.pid) unlinkSync(LOCK_FILE);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Detached injectors have no console; keep a rolling log for troubleshooting. */
+function enableDaemonLogging() {
+  try {
+    mkdirSync(join(ROOT, '.nuvio'), { recursive: true });
+    try {
+      if (statSync(LOG_FILE).size > 1024 * 1024) writeFileSync(LOG_FILE, '');
+    } catch {
+      /* first run */
+    }
+    const write = (level, args) => {
+      const line = `[${new Date().toISOString()}] ${level} ${args
+        .map((value) => (typeof value === 'string' ? value : JSON.stringify(value)))
+        .join(' ')}\n`;
+      try {
+        appendFileSync(LOG_FILE, line);
+      } catch {
+        /* ignore */
+      }
+    };
+    const original = { log: console.log, warn: console.warn, error: console.error };
+    console.log = (...args) => {
+      original.log(...args);
+      write('INFO', args);
+    };
+    console.warn = (...args) => {
+      original.warn(...args);
+      write('WARN', args);
+    };
+    console.error = (...args) => {
+      original.error(...args);
+      write('ERROR', args);
+    };
+  } catch {
+    /* logging must never block injection */
+  }
 }
 
 function contentType(file) {
@@ -252,7 +343,7 @@ function startStaticServer(options) {
   });
 }
 
-function readRequestBody(request, limit = 8192) {
+function readRequestBody(request, limit = 65536) {
   return new Promise((resolvePromise, reject) => {
     let body = '';
     request.setEncoding('utf8');
@@ -360,6 +451,8 @@ function startControlServer(options, token, hooks) {
 
     const isApi =
       url.pathname === '/restore' ||
+      url.pathname === '/config' ||
+      url.pathname === '/reload' ||
       url.pathname.startsWith('/api/workshop/') ||
       url.pathname.startsWith('/api/library/');
     if (!isApi) {
@@ -372,6 +465,10 @@ function startControlServer(options, token, hooks) {
     }
 
     try {
+      if (request.method === 'GET' && url.pathname === '/config') {
+        send(200, { ok: true, config: await hooks.getConfig() });
+        return;
+      }
       if (request.method === 'GET' && url.pathname === '/api/workshop/list') {
         send(200, { ok: true, ...listWorkshop() });
         return;
@@ -392,6 +489,16 @@ function startControlServer(options, token, hooks) {
       }
 
       const payload = await readRequestBody(request);
+      if (url.pathname === '/config') {
+        const result = await hooks.applyConfig(payload.config || payload);
+        send(200, { ok: true, ...result });
+        return;
+      }
+      if (url.pathname === '/reload') {
+        await hooks.reload();
+        send(200, { ok: true });
+        return;
+      }
       if (url.pathname === '/restore') {
         const result = await hooks.restore(payload);
         send(200, { ok: true, ...result });
@@ -459,6 +566,10 @@ class CdpClient {
     this.nextId = 1;
     this.pending = new Map();
     this.events = new Map();
+  }
+
+  isOpen() {
+    return this.ws?.readyState === 1;
   }
 
   static async connect(url) {
@@ -631,6 +742,7 @@ async function main() {
     printHelp();
     return;
   }
+  if (options.daemon) enableDaemonLogging();
 
   if (!existsSync(options.bundle)) {
     throw new Error(`missing bundle: ${options.bundle}\nRun: npm run embed`);
@@ -644,7 +756,12 @@ async function main() {
     return;
   }
 
-  const target = selectTarget(targets, options.target);
+  if (!options.once && !acquireLock()) {
+    console.log('[nuvio] another injector is already running for this checkout; exiting.');
+    return;
+  }
+
+  let target = selectTarget(targets, options.target);
   console.log(`[nuvio] target: ${target.title || target.url}`);
 
   let assetServer = null;
@@ -767,6 +884,81 @@ async function main() {
     return { scriptRemoved, reload, keepConfig, cleanup: result };
   }
 
+  async function getPageConfig() {
+    if (!cdp?.isOpen()) return null;
+    const result = await cdp.send('Runtime.evaluate', {
+      expression: "localStorage.getItem('codex-dynamic-bg:v2')",
+      returnByValue: true,
+    });
+    const raw = result.result?.value;
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+
+  async function applyPageConfig(config) {
+    if (!config || typeof config !== 'object') throw new Error('config must be an object');
+    if (!cdp?.isOpen()) throw new Error('page is not connected');
+    // Prefer the live API so the scene re-renders immediately; fall back to
+    // localStorage for pages that mounted before the API existed.
+    const result = await cdp.send('Runtime.evaluate', {
+      expression: `(() => {
+        const patch = ${JSON.stringify(config)};
+        if (window.cxdBg && typeof window.cxdBg.setConfig === 'function') {
+          window.cxdBg.setConfig(patch);
+          return 'live';
+        }
+        try {
+          const key = 'codex-dynamic-bg:v2';
+          const current = JSON.parse(localStorage.getItem(key) || '{}') || {};
+          localStorage.setItem(key, JSON.stringify(Object.assign(current, patch)));
+          return 'storage';
+        } catch {
+          return 'failed';
+        }
+      })()`,
+      returnByValue: true,
+    });
+    return { applied: result.result?.value !== 'failed', mode: result.result?.value || 'unknown' };
+  }
+
+  async function reloadPage() {
+    if (!cdp?.isOpen()) throw new Error('page is not connected');
+    const loaded = cdp.waitFor('Page.loadEventFired', 20000);
+    await cdp.send('Page.reload', { ignoreCache: true });
+    await loaded.catch(() => {});
+    await sleep(800);
+  }
+
+  function persistState(identifier, activeTarget) {
+    try {
+      writeFileSync(
+        STATE_FILE,
+        `${JSON.stringify(
+          {
+            port: options.port,
+            targetId: activeTarget.id,
+            targetTitle: activeTarget.title || '',
+            targetUrl: activeTarget.url || '',
+            identifier: identifier?.identifier || '',
+            controlPort: controlServer?.port || null,
+            token: controlServer ? controlToken : '',
+            pid: process.pid,
+            injectedAt,
+          },
+          null,
+          2,
+        )}\n`,
+      );
+      stateWritten = true;
+    } catch (error) {
+      console.warn(`[nuvio] could not write ${STATE_FILE}: ${error.message}`);
+    }
+  }
+
   function closeResources() {
     try {
       cdp?.close();
@@ -789,6 +981,7 @@ async function main() {
     if (shuttingDown) return;
     shuttingDown = true;
     closeResources();
+    releaseLock();
     if (stateWritten) {
       try {
         unlinkSync(STATE_FILE);
@@ -806,6 +999,9 @@ async function main() {
       controlServer = await startControlServer(options, controlToken, {
         status: () => ({ ...controlStatus, controlPort: controlServer?.port || null }),
         restore: (payload) => performRestore(payload),
+        getConfig: () => getPageConfig(),
+        applyConfig: (config) => applyPageConfig(config),
+        reload: () => reloadPage(),
         shutdown,
       });
       console.log(`[nuvio] control: http://127.0.0.1:${controlServer.port}/status`);
@@ -849,29 +1045,7 @@ async function main() {
       throw new Error('injection ran, but #cxd-bg-root was not created');
     }
 
-    try {
-      writeFileSync(
-        STATE_FILE,
-        `${JSON.stringify(
-          {
-            port: options.port,
-            targetId: target.id,
-            targetTitle: target.title || '',
-            targetUrl: target.url || '',
-            identifier: registered.identifier || '',
-            controlPort: controlServer?.port || null,
-            token: controlServer ? controlToken : '',
-            pid: process.pid,
-            injectedAt,
-          },
-          null,
-          2,
-        )}\n`,
-      );
-      stateWritten = true;
-    } catch (error) {
-      console.warn(`[nuvio] could not write ${STATE_FILE}: ${error.message}`);
-    }
+    persistState(registered, target);
 
     console.log('[nuvio] injected.');
     if (options.once) {
@@ -881,8 +1055,57 @@ async function main() {
       return;
     }
 
-    console.log('[nuvio] resident injector running; keep this window open.');
+    console.log(
+      options.daemon
+        ? '[nuvio] resident injector running in the background; log: .nuvio/injector.log'
+        : '[nuvio] resident injector running; keep this window open.',
+    );
     console.log('[nuvio] stop and clean with: npm run restore');
+
+    // Codex may restart (update, crash, user relaunch). As long as it comes
+    // back with the same CDP port, re-register the layer automatically instead
+    // of asking the user to double-click the shortcut again.
+    let reattaching = false;
+    const watcher = setInterval(async () => {
+      if (shuttingDown || reattaching || cdp?.isOpen()) return;
+      reattaching = true;
+      try {
+        const list = await getTargets(options.port);
+        const next = selectTarget(list, options.target);
+        const client = await CdpClient.connect(next.webSocketDebuggerUrl);
+        await client.send('Page.enable');
+        await client.send('Runtime.enable');
+        try {
+          await client.send('Page.setBypassCSP', { enabled: true });
+        } catch {
+          /* older builds */
+        }
+        const nextRegistration = await client.send('Page.addScriptToEvaluateOnNewDocument', {
+          source,
+        });
+        const loaded = client.waitFor('Page.loadEventFired', 20000);
+        await client.send('Page.reload', { ignoreCache: true });
+        await loaded.catch(() => {});
+        await sleep(1000);
+        try {
+          cdp?.close();
+        } catch {
+          /* ignore */
+        }
+        cdp = client;
+        registered = nextRegistration;
+        target = next;
+        controlStatus.target = next.title || next.url;
+        controlStatus.targetId = next.id;
+        persistState(registered, next);
+        console.log(`[nuvio] reattached to ${next.title || next.url}`);
+      } catch {
+        /* Codex is not back yet; retry on the next tick. */
+      } finally {
+        reattaching = false;
+      }
+    }, 2500);
+    watcher.unref?.();
 
     const onSignal = () => {
       performRestore({ keepConfig: true, reload: false })

@@ -727,7 +727,9 @@ export async function mount(host, options = {}) {
     },
     {
       compact: embed,
-        subtitle: embed ? '嵌入模式 · 实时生效' : 'Nuvio',
+        subtitle: embed
+          ? `嵌入模式 · v${typeof __NUVIO_VERSION__ === 'undefined' ? 'dev' : __NUVIO_VERSION__}`
+          : 'Nuvio',
     },
   );
   uiLayer.appendChild(panelRef.panel);

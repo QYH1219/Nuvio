@@ -1,12 +1,16 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createInterface } from 'node:readline/promises';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const BUNDLE = join(ROOT, 'dist-embed', 'codex-dynamic-bg.iife.js');
 const VENDOR_DRACO = join(ROOT, 'public', 'vendor', 'draco', 'draco_decoder.js');
+const STATE_FILE = join(ROOT, '.cxd-inject.json');
+const LOG_FILE = join(ROOT, '.nuvio', 'injector.log');
 const IS_WIN = process.platform === 'win32';
+const VERSION = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).version;
 
 function parseArgs(argv) {
   const options = {
@@ -15,7 +19,9 @@ function parseArgs(argv) {
     build: false,
     noBuild: false,
     launch: true,
-    restart: true,
+    restart: false,
+    yes: false,
+    detach: true,
     force: false,
     forward: [],
   };
@@ -37,6 +43,9 @@ function parseArgs(argv) {
     else if (arg === '--no-build') options.noBuild = true;
     else if (arg === '--no-launch') options.launch = false;
     else if (arg === '--no-restart') options.restart = false;
+    else if (arg === '--restart') options.restart = true;
+    else if (arg === '--yes' || arg === '-y') options.yes = true;
+    else if (arg === '--foreground' || arg === '--no-detach') options.detach = false;
     else if (arg === '--force') options.force = true;
     else if (arg === '--help' || arg === '-h') options.help = true;
     else {
@@ -63,7 +72,10 @@ Options:
   --build          force a rebuild of the injection bundle
   --no-build       never build; fail if the bundle is missing
   --no-launch      do not launch Codex; expect CDP to already be up
-  --no-restart     fail instead of restarting a Codex that has no CDP port
+  --restart        restart Codex automatically when it has no CDP port
+  --no-restart     never restart; fail with instructions instead
+  -y, --yes        assume "yes" for the restart prompt
+  --foreground     keep the injector attached to this console
   --force          replace a resident injector instead of reusing it
   -h, --help       show this help
 
@@ -186,6 +198,124 @@ async function stopInjector(status) {
   await sleep(600);
 }
 
+function readState() {
+  try {
+    return JSON.parse(readFileSync(STATE_FILE, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function commandLineOf(pid) {
+  if (!IS_WIN) return '';
+  try {
+    const result = spawnSync(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        `$p = Get-CimInstance Win32_Process -Filter "ProcessId=${Number(pid)}"; if ($p) { $p.CommandLine }`,
+      ],
+      { encoding: 'utf8', windowsHide: true, timeout: 8000 },
+    );
+    return result.stdout || '';
+  } catch {
+    return '';
+  }
+}
+
+function pidAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A crashed start can leave a detached injector that no longer answers on its
+ * control port. Only kill a pid that is provably our inject.mjs, never a random
+ * Node process that happens to have reused the pid.
+ */
+async function cleanupOrphanInjector() {
+  const state = readState();
+  if (!state?.pid || !pidAlive(Number(state.pid))) return;
+  // A healthy injector answers on its control port; never kill it just because
+  // the user double-clicked the shortcut again.
+  if (await probeInjector()) return;
+  const command = commandLineOf(Number(state.pid));
+  if (!/inject\.mjs/i.test(command)) return;
+  console.log(`[nuvio] cleaning up stale injector (pid ${state.pid}) ...`);
+  spawnSync('taskkill', ['/PID', String(state.pid), '/T', '/F'], {
+    stdio: 'ignore',
+    windowsHide: true,
+  });
+}
+
+async function waitForInjector(seconds) {
+  const deadline = Date.now() + seconds * 1000;
+  while (Date.now() < deadline) {
+    const status = await probeInjector();
+    if (status) return status;
+    await sleep(400);
+  }
+  return null;
+}
+
+function printInjectorLogTail(lines = 18) {
+  try {
+    const content = readFileSync(LOG_FILE, 'utf8').trimEnd().split(/\r?\n/);
+    if (!content.length) return;
+    console.log('[nuvio] last injector log lines:');
+    for (const line of content.slice(-lines)) console.log(`  ${line}`);
+  } catch {
+    /* no daemon log yet */
+  }
+}
+
+async function askYesNo(question) {
+  if (!process.stdin.isTTY) return false;
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const answer = await rl.question(question);
+    return /^y(es)?$/i.test(answer.trim());
+  } finally {
+    rl.close();
+  }
+}
+
+/** Non-blocking release check: one short lookup, never a hard dependency. */
+async function checkForUpdate() {
+  if (process.env.NUVIO_NO_UPDATE_CHECK === '1') return;
+  try {
+    const response = await fetch('https://api.github.com/repos/QYH1219/QYH1219/releases/latest', {
+      headers: { 'user-agent': `nuvio/${VERSION}` },
+      signal: AbortSignal.timeout(1500),
+    });
+    if (!response.ok) return;
+    const data = await response.json();
+    const latest = String(data.tag_name || '').replace(/^v/i, '');
+    if (!latest || latest === VERSION) return;
+    const compare = (a, b) => {
+      const left = a.split('.').map(Number);
+      const right = b.split('.').map(Number);
+      for (let index = 0; index < 3; index += 1) {
+        if ((left[index] || 0) !== (right[index] || 0)) return (left[index] || 0) - (right[index] || 0);
+      }
+      return 0;
+    };
+    if (compare(latest, VERSION) > 0) {
+      console.log(`[nuvio] update available: v${latest} (you have v${VERSION})`);
+      console.log(`[nuvio] ${data.html_url || 'https://github.com/QYH1219/QYH1219/releases'}`);
+    }
+  } catch {
+    /* offline or rate limited — stay quiet */
+  }
+}
+
 async function probeCdp(port) {
   try {
     const response = await fetch(`http://127.0.0.1:${port}/json/list`, {
@@ -241,14 +371,14 @@ async function main() {
     throw new Error(`Node.js 22+ is required, found ${process.version}`);
   }
 
-  console.log('[nuvio] Codex Dynamic Background');
+  console.log(`[nuvio] Nuvio v${VERSION}`);
 
-  if (!existsSync(join(ROOT, 'node_modules', 'three'))) {
-    console.log('[nuvio] installing dependencies ...');
-    installDependencies();
-  }
-
-  if (!options.noBuild && (options.build || !existsSync(BUNDLE) || !existsSync(VENDOR_DRACO))) {
+  const needsBuild = options.build || !existsSync(BUNDLE) || !existsSync(VENDOR_DRACO);
+  if (needsBuild && !options.noBuild) {
+    if (!existsSync(join(ROOT, 'node_modules', 'three'))) {
+      console.log('[nuvio] installing dependencies (first build only) ...');
+      installDependencies();
+    }
     console.log('[nuvio] building the injection bundle ...');
     runNpm('embed');
   }
@@ -256,6 +386,8 @@ async function main() {
   if (!existsSync(BUNDLE)) {
     throw new Error('missing dist-embed bundle; run npm run embed (or drop --no-build)');
   }
+
+  await cleanupOrphanInjector();
 
   // A resident injector already keeps the saved layer alive across page
   // reloads. Double-clicking the desktop shortcut again should be harmless,
@@ -269,10 +401,12 @@ async function main() {
     if (cdpAlive) {
       console.log(`[nuvio] already running (pid ${existing.pid}); the saved background is active.`);
       console.log('[nuvio] use --force to reload the injector.');
+      await checkForUpdate();
       return;
     }
-    console.log('[nuvio] stale injector detected; restarting it ...');
-    await stopInjector(existing);
+    // Keep the injector: it reattaches by itself as soon as Codex is back with
+    // the same debugging port. Killing it would only lose the saved session.
+    console.log(`[nuvio] injector (pid ${existing.pid}) is waiting for Codex ...`);
   }
 
   let cdpReady = await probeCdp(options.port);
@@ -288,11 +422,21 @@ async function main() {
     }
     if (running.length && !cdpReady) {
       if (!options.restart) {
-        throw new Error(
-          `Codex is already running (${running.join(', ')}) without a debugging port.\n` +
-            'Quit Codex completely (including the tray icon), then run npm start again.\n' +
-            'If you accept restarting it, run: npm run launch:codex -- -KillExisting',
-        );
+        if (!options.yes) {
+          console.log('');
+          console.log(`[nuvio] Codex is running (${running.join(', ')}) without a debugging port.`);
+          console.log('[nuvio] Nuvio can only attach through Chromium CDP, so Codex has to restart once.');
+          console.log('[nuvio] Your saved wallpaper lives in the renderer profile and comes back automatically.');
+        }
+        const accepted =
+          options.yes || (await askYesNo('[nuvio] Restart Codex now? [y/N] '));
+        if (!accepted) {
+          throw new Error(
+            'Codex is running without a debugging port.\n' +
+              'Quit Codex completely (including the tray icon) and double-click Nuvio again,\n' +
+              'or rerun with --restart to allow one automatic restart.',
+          );
+        }
       }
       console.log('[nuvio] Codex is running without a debugging port; restarting it once ...');
       await stopCodex();
@@ -314,9 +458,31 @@ async function main() {
     String(options.port),
     '--wait',
     '15',
+    ...(options.detach && !options.forward.includes('--once') ? ['--daemon'] : []),
     ...options.forward,
   ];
   console.log('[nuvio] injecting ...');
+
+  if (options.detach && !options.forward.includes('--once')) {
+    const child = spawn(process.execPath, injectArgs, {
+      cwd: ROOT,
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+    child.unref();
+    const status = await waitForInjector(25);
+    if (!status) {
+      printInjectorLogTail();
+      throw new Error(
+        'the injector did not report ready within 25s; run npm start -- --foreground to see live logs',
+      );
+    }
+    console.log(`[nuvio] ready (pid ${status.pid}) · ${status.target || 'Codex window'}`);
+    console.log('[nuvio] the background is resident; this window can close.');
+    await checkForUpdate();
+    return;
+  }
 
   const child = spawn(process.execPath, injectArgs, {
     cwd: ROOT,
@@ -335,6 +501,7 @@ async function main() {
     }
     process.exitCode = code ?? 1;
   });
+  await checkForUpdate();
 }
 
 main().catch((error) => {

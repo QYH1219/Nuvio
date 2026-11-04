@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { scoreTarget, selectTarget } from './target-score.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const BUNDLE = join(ROOT, 'dist-embed', 'codex-dynamic-bg.iife.js');
@@ -140,8 +141,13 @@ async function probeCdp(port) {
     const list = await fetch(`${base}/json/list`, { signal: AbortSignal.timeout(1800) });
     const targets = list.ok ? await list.json() : [];
     const pages = targets.filter((target) => target.type === 'page' && target.webSocketDebuggerUrl);
-    const codex = pages.find((target) => /codex|chatgpt/i.test(`${target.title} ${target.url}`));
-    return { ok: true, info, pages, codex: codex || pages[0] || null };
+    let codex = null;
+    try {
+      codex = selectTarget(targets);
+    } catch {
+      codex = pages[0] || null;
+    }
+    return { ok: true, info, pages, codex };
   } catch (error) {
     return { ok: false, error: error?.message || String(error) };
   }
@@ -274,7 +280,9 @@ async function main() {
       cdp.codex ? 'ok' : 'warn',
       'Codex 页面',
       cdp.codex
-        ? `${cdp.codex.title || '(no title)'} · ${cdp.codex.url || ''}`
+        ? `${cdp.codex.title || '(no title)'} · ${cdp.codex.url || ''} · score ${scoreTarget(
+            cdp.codex,
+          )}`
         : `未找到 page target（共 ${cdp.pages.length} 个）`,
     );
   } else {

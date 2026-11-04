@@ -1,10 +1,11 @@
-import { existsSync, readFileSync, unlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildCleanupExpression } from './cleanup-expression.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const STATE_FILE = join(ROOT, '.cxd-inject.json');
+const BACKUP_DIR = join(ROOT, '.nuvio', 'backups');
 
 function parseArgs(argv) {
   const options = {
@@ -228,6 +229,41 @@ async function requestControlRestore(state, options) {
   }
 }
 
+async function readControlConfig(state) {
+  if (!state?.controlPort) return null;
+  try {
+    const response = await fetch(`http://127.0.0.1:${state.controlPort}/config`, {
+      headers: state.token ? { 'x-cxd-token': state.token } : {},
+      signal: AbortSignal.timeout(2500),
+    });
+    if (!response.ok) return null;
+    const payload = await response.json();
+    return payload?.config || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Restore is the one destructive action in Nuvio: it clears localStorage.
+ * Always leave a timestamped copy so a mis-click never loses the wallpaper
+ * configuration.
+ */
+function backupConfig(config, source) {
+  if (!config) return null;
+  try {
+    mkdirSync(BACKUP_DIR, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const file = join(BACKUP_DIR, `config-${stamp}.json`);
+    writeFileSync(file, `${JSON.stringify({ source, savedAt: new Date().toISOString(), config }, null, 2)}\n`);
+    console.log(`[nuvio] config backup: ${file}`);
+    return file;
+  } catch (error) {
+    console.warn(`[nuvio] config backup failed: ${error.message}`);
+    return null;
+  }
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   if (options.help) {
@@ -251,6 +287,9 @@ async function main() {
   }
 
   const daemonAlive = isProcessAlive(state?.pid);
+  if (!options.keepConfig) {
+    backupConfig(await readControlConfig(state), 'resident');
+  }
   const residentResult = await requestControlRestore(state, options);
   if (residentResult) {
     console.log(
@@ -288,6 +327,18 @@ async function main() {
   try {
     await cdp.send('Page.enable');
     await cdp.send('Runtime.enable');
+
+    if (!options.keepConfig) {
+      try {
+        const live = await cdp.send('Runtime.evaluate', {
+          expression: "localStorage.getItem('codex-dynamic-bg:v2')",
+          returnByValue: true,
+        });
+        if (live.result?.value) backupConfig(JSON.parse(live.result.value), 'page');
+      } catch {
+        /* page may not have a config */
+      }
+    }
 
     if (state?.identifier) {
       try {

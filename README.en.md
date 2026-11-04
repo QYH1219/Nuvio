@@ -78,13 +78,26 @@ Double-click `start.cmd` in the repository root, or run:
 npm start
 ```
 
-The launcher installs missing dependencies, builds the injection bundle, checks CDP, starts Codex with the debugging port when needed, then injects and stays resident.
+The launcher installs missing dependencies, builds the injection bundle, checks CDP, starts Codex with the debugging port when needed, then injects and stays resident. The injector detaches into the background by default; use `--foreground` when you want live logs in the console.
 
-- There is exactly one desktop shortcut. It starts Codex with the debugging port when needed, restarts a running instance that has no port, then injects. The saved wallpaper and appearance survive the restart.
+- There is exactly one desktop shortcut. It starts Codex with the debugging port when needed, asks before restarting a running instance that has no port, then injects. The saved wallpaper and appearance survive the restart.
 - `npm run shortcut` creates the single `Nuvio` shortcut; `npm run shortcut -- --remove` deletes it. The launcher window starts minimized; use the taskbar button to read the log.
-- Keep the current window instead of letting the launcher restart it: `npm start -- --no-restart`. Replace an already resident injector: `npm start -- --force`.
-- Keep the launcher window open. Closing it stops the resident injector, so the next reload restores the normal UI.
+- Keep the current window: `npm start -- --no-restart`. Accept the prompt non-interactively: `--yes`. Skip the prompt and restart: `--restart`. Replace an already resident injector: `npm start -- --force`.
+- The injector runs hidden in the background and logs to `.nuvio/injector.log`; stop it with `npm run restore`, or use `npm start -- --foreground` for an attached console.
 - CDP already handled elsewhere: `npm start -- --no-launch`. Force a rebuild: `npm start -- --build`.
+
+#### Wallpaper bundles, portable build, autostart
+
+```powershell
+npm run bundle -- export --name nestwave
+npm run bundle -- import "exports/nestwave.nuvio.zip"
+npm run pack
+npm run autostart -- enable
+npm run autostart -- status
+npm run autostart -- disable
+```
+
+`npm run bundle` packages the active wallpaper, scene/mask files, library entries and panel config into one `.nuvio.zip`. `npm run pack` writes `dist/nuvio-<version>-portable.zip`; no `npm install` is required on the target machine. Autostart uses the current user's Startup folder and needs no administrator rights. Bundles live in `exports/`, runtime state in `.nuvio/`; neither is committed.
 
 ### Preview modes
 

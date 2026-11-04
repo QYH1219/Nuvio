@@ -76,11 +76,11 @@ GLB 模型默认被 `.gitignore` 忽略；clone 后先看到的是程序化占�
 npm start
 ```
 
-启动器会按顺序完成：安装缺失依赖 → 构建注入包 → 检查 CDP → 必要时带调试端口启动 Codex → 注入并常驻。第一次运行会慢一些，之后是秒级。
+启动器会按顺序完成：安装缺失依赖 → 构建注入包 → 检查 CDP → 必要时带调试端口启动 Codex → 注入并常驻。第一次运行会慢一些，之后是秒级。注入器默认转入后台隐藏运行，不再占用一个常驻命令行窗口；需要看实时日志时加 `--foreground`。
 
 #### 桌面快捷方式
 
-桌面只保留一个快捷方式，双击就是完整流程：启动器会自己判断 Codex 是否在运行、有没有调试端口；需要时会带 `--remote-debugging-port` 重新拉起一次，然后注入并常驻。壁纸选择和画面参数保存在本地，重启不会把已经调好的画面重置。
+桌面只保留一个快捷方式，双击就是完整流程：启动器会自己判断 Codex 是否在运行、有没有调试端口；需要时会询问是否带 `--remote-debugging-port` 重新拉起一次，然后注入并常驻。壁纸选择和画面参数保存在本地，重启不会把已经调好的画面重置。
 
 ```powershell
 npm run shortcut              # 创建唯一的「Nuvio」快捷方式
@@ -90,10 +90,29 @@ npm run shortcut -- --dry-run # 只看会写入什么，不创建文件
 
 生成的快捷方式带仓库自带的 `public/icon.ico`，工作目录指向仓库根目录，所以从任何位置双击都能跑。启动窗口默认最小化，点任务栏图标可以看日志。
 
-- 已经在运行但没有调试端口的 Codex 会被自动重启一次；当前壁纸仍从本地保存的素材和参数恢复。想保留当前窗口、不让启动器重启，用 `npm start -- --no-restart`。
+- 已经在运行但没有调试端口的 Codex 默认会先询问；`npm start -- --yes` 直接同意，`npm start -- --restart` 跳过询问自动重启，`npm start -- --no-restart` 保留当前窗口。当前壁纸始终从本地保存的素材和参数恢复。
 - 常驻注入器已经在跑时，再次双击快捷方式只会复用现有实例，不会重复起端口；要强制换一个新实例用 `npm start -- --force`。
-- 注入成功后保持启动窗口开着；关闭窗口会停止常驻注入器，下一次刷新就会恢复原样。
+- 注入成功后注入器转入后台隐藏运行，日志写到 `.nuvio/injector.log`；要停止它用 `npm run restore`。需要前台实时日志时用 `npm start -- --foreground`。
 - 只想注入、自己负责启动 Codex：`npm start -- --no-launch`；只重新构建：`npm start -- --build`。
+
+#### 壁纸包、便携版与开机自启
+
+```powershell
+# 把当前壁纸、scene/mask、素材库条目和面板参数打成一个文件
+npm run bundle -- export --name 奶蛙
+# 恢复到本机（会自动应用当前配置）
+npm run bundle -- import "exports/奶蛙.nuvio.zip"
+
+# 生成免安装发布包：dist/nuvio-<version>-portable.zip
+npm run pack
+
+# 登录时自动启动（写入当前用户 Startup 文件夹，不需要管理员）
+npm run autostart -- enable
+npm run autostart -- status
+npm run autostart -- disable
+```
+
+壁纸包默认输出到 `exports/`，运行状态和日志在 `.nuvio/`，两者都不提交到 Git。
 
 ### 预览模式
 

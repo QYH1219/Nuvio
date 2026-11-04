@@ -1,6 +1,8 @@
 import { QUALITY, QUALITY_ORDER } from './config.js';
 import { createWorkshopSection } from './panel/workshop.js';
 
+const NUVIO_VERSION = typeof __NUVIO_VERSION__ === 'undefined' ? 'dev' : __NUVIO_VERSION__;
+
 /**
  * Four sections, ordered by how often a user touches them:
  *   壁纸   — pick artwork (local file, Steam workshop, built-in)
@@ -112,7 +114,7 @@ export function createHud() {
   el.innerHTML = `
     <div class="cxd-brand">
       <span class="cxd-mark"></span>
-            <div class="cxd-brand-text"><b>NUVIO</b><span>DYNAMIC WALLPAPER</span></div>
+            <div class="cxd-brand-text"><b>NUVIO</b><span>DYNAMIC WALLPAPER · v${NUVIO_VERSION}</span></div>
     </div>
     <div class="cxd-status">
       <span class="cxd-status-dot"></span>
