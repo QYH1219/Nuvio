@@ -206,7 +206,7 @@ See [docs/INJECTION.md](docs/INJECTION.md) for the full flow and troubleshooting
 
 ## Configuration
 
-Stored in `localStorage` under `codex-dynamic-bg:v1`:
+Stored in `localStorage` under `codex-dynamic-bg:v2`:
 
 | Key | Default | Description |
 | --- | --- | --- |

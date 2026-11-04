@@ -247,7 +247,7 @@ npm run inject -- --no-serve --asset-base https://cdn.example.com/bg/
 
 ## 配置
 
-设置面板写入 `localStorage` 的 `codex-dynamic-bg:v1`。字段：
+设置面板写入 `localStorage` 的 `codex-dynamic-bg:v2`。字段：
 
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
