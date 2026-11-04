@@ -56,6 +56,8 @@ mount()
 3. Particles: `THREE.Points` with additive blending.
 4. Post: `UnrealBloomPass` then a custom grade shader (grain, vignette, color grade).
 
+The background plane accepts a `THREE.Texture` or a `THREE.VideoTexture`. Video takes priority over a still image; both feed the same shader, so parallax, dim, grain, and motion apply identically. `BackgroundEngine.disposeBackgroundTexture()` pauses and releases the video element.
+
 Quality presets change device pixel ratio, bloom enablement, particle count scale, and shadow usage.
 
 ## Configuration flow

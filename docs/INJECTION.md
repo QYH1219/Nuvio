@@ -99,7 +99,7 @@ Usually WebGL initialization failure or a CSP issue with the asset server. Check
 
 ### Assets 404
 
-`public/assets/` is served from the repository root. Verify the file exists and that its extension is in the MIME map (`.glb`, `.gltf`, `.bin`, `.png`, `.jpg`, `.jpeg`, `.webp`, `.ktx2`).
+`public/assets/` is served from the repository root. Verify the file exists and that its extension is in the MIME map (`.glb`, `.gltf`, `.bin`, `.png`, `.jpg`, `.jpeg`, `.webp`, `.ktx2`, `.mp4`, `.webm`, `.m4v`).
 
 ## Removing the injection
 

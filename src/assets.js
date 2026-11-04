@@ -7,6 +7,8 @@ const IMAGE_CANDIDATES = [
 
 const MODEL_CANDIDATES = ['assets/model.glb', 'assets/model.gltf'];
 
+const VIDEO_CANDIDATES = ['assets/background.mp4', 'assets/background.webm'];
+
 export function assetBaseUrl() {
   return window.__CXD_ASSET_BASE__ || './';
 }
@@ -41,10 +43,20 @@ export async function probeAssets() {
   const base = assetBaseUrl();
   const explicit = window.__CXD_ASSETS__ || {};
   const result = {
+    videoUrl: explicit.videoUrl || explicit.video || null,
     imageUrl: explicit.imageUrl || explicit.background || null,
     modelUrl: explicit.modelUrl || explicit.model || null,
   };
 
+  if (!result.videoUrl) {
+    for (const path of VIDEO_CANDIDATES) {
+      const url = join(base, path);
+      if (await exists(url)) {
+        result.videoUrl = url;
+        break;
+      }
+    }
+  }
   if (!result.imageUrl) {
     for (const path of IMAGE_CANDIDATES) {
       const url = join(base, path);
@@ -75,6 +87,73 @@ export function loadImage(url) {
     img.onerror = () => reject(new Error('image load failed: ' + url));
     img.src = url;
   });
+}
+
+/**
+ * Load a muted, looping, inline video and wait until its dimensions are known.
+ * Muted + playsInline is what makes autoplay legal in Chromium/Electron.
+ */
+export function loadVideo(url) {
+  return new Promise((resolve, reject) => {
+    const video = document.createElement('video');
+    video.src = url;
+    video.muted = true;
+    video.defaultMuted = true;
+    video.loop = true;
+    video.autoplay = true;
+    video.playsInline = true;
+    video.preload = 'auto';
+    video.crossOrigin = 'anonymous';
+    video.disablePictureInPicture = true;
+    video.setAttribute('aria-hidden', 'true');
+
+    const cleanup = () => {
+      video.removeEventListener('loadedmetadata', onReady);
+      video.removeEventListener('error', onError);
+    };
+    const onReady = () => {
+      cleanup();
+      if (!video.videoWidth || !video.videoHeight) {
+        reject(new Error('video has no dimensions: ' + url));
+        return;
+      }
+      resolve(video);
+    };
+    const onError = () => {
+      cleanup();
+      reject(new Error('video load failed: ' + url));
+    };
+
+    video.addEventListener('loadedmetadata', onReady, { once: true });
+    video.addEventListener('error', onError, { once: true });
+    video.load();
+  });
+}
+
+export async function startVideo(video) {
+  if (!video || video.paused === false) return;
+
+  const attempt = async () => {
+    try {
+      await video.play();
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  if (await attempt()) return;
+
+  // Autoplay can be refused until the page has a user gesture. Retry once on
+  // the first interaction; the paused first frame is still rendered meanwhile.
+  const retry = async () => {
+    if (await attempt()) {
+      window.removeEventListener('pointerdown', retry);
+      window.removeEventListener('keydown', retry);
+    }
+  };
+  window.addEventListener('pointerdown', retry);
+  window.addEventListener('keydown', retry);
 }
 
 /** Procedural fallback so the demo looks finished before real art arrives. */

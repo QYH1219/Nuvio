@@ -1,5 +1,11 @@
 import { loadConfig, saveConfig, resetConfig } from './config.js';
-import { probeAssets, loadImage, createFallbackBackground } from './assets.js';
+import {
+  probeAssets,
+  loadImage,
+  loadVideo,
+  startVideo,
+  createFallbackBackground,
+} from './assets.js';
 import { BackgroundEngine } from './scene.js';
 import { createHud, createHints, createPanel, createMock } from './ui.js';
 
@@ -97,13 +103,30 @@ export async function mount(host, options = {}) {
     dispose,
   };
 
-  const assets = { imageUrl: null, modelUrl: null, background: 'placeholder', model: 'placeholder' };
+  const assets = {
+    videoUrl: null,
+    imageUrl: null,
+    modelUrl: null,
+    background: 'placeholder',
+    model: 'placeholder',
+  };
 
   // Background first so the first painted frame is not empty.
   try {
     const probed = await probeAssets();
     Object.assign(assets, probed);
-    if (probed.imageUrl) {
+    if (probed.videoUrl) {
+      try {
+        const video = await loadVideo(probed.videoUrl);
+        await engine.setBackgroundVideo(video);
+        startVideo(video);
+        assets.background = 'video';
+      } catch (error) {
+        console.warn('[codex-bg] background video failed, trying image', error);
+        assets.videoUrl = null;
+      }
+    }
+    if (assets.background !== 'video' && probed.imageUrl) {
       try {
         const img = await loadImage(probed.imageUrl);
         await engine.setBackgroundImage(img);
@@ -113,7 +136,7 @@ export async function mount(host, options = {}) {
         await engine.setBackgroundImage(createFallbackBackground());
         assets.background = 'placeholder';
       }
-    } else {
+    } else if (assets.background !== 'video') {
       await engine.setBackgroundImage(createFallbackBackground());
       assets.background = 'placeholder';
     }
@@ -124,7 +147,13 @@ export async function mount(host, options = {}) {
 
   bar.style.width = '45%';
   setStatus(
-    `背景 ${assets.background === 'image' ? '自定义图' : '程序化'} · 模型加载中`,
+    `背景 ${
+      assets.background === 'video'
+        ? '视频'
+        : assets.background === 'image'
+          ? '自定义图'
+          : '程序化'
+    } · 模型加载中`,
   );
 
   if (assets.modelUrl) {
@@ -144,7 +173,13 @@ export async function mount(host, options = {}) {
 
   bar.style.width = '100%';
   setStatus(
-    `背景 ${assets.background === 'image' ? '自定义图' : '程序化'} · 模型 ${
+    `背景 ${
+      assets.background === 'video'
+        ? '视频'
+        : assets.background === 'image'
+          ? '自定义图'
+          : '程序化'
+    } · 模型 ${
       assets.model === 'glb' ? 'GLB' : '占位'
     }`,
   );

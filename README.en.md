@@ -13,7 +13,7 @@ An interactive WebGL background layer for Codex Desktop: custom artwork, Tripo G
 ## Features
 
 - Full-window background rendered behind the Codex UI, with `pointer-events: none`.
-- Custom background image (WebP / PNG / JPG) sampled by a fullscreen shader with slow drift and parallax.
+- Custom background image (WebP / PNG / JPG) or video (MP4 / WebM) sampled by a fullscreen shader with slow drift and parallax.
 - GLB / glTF loading with automatic centering and bounding-box scaling; Draco, Meshopt, and KTX2 supported.
 - Model spin, mouse tilt, bloom, particles, vignette, film grain, and click ripples.
 - Live settings panel with persisted configuration.
@@ -62,6 +62,7 @@ Drop files into `public/assets/` using any of these names:
 
 ```text
 public/assets/background.webp   # or .png / .jpg / .jpeg
+public/assets/background.mp4    # or .webm, takes priority over the still image
 public/assets/model.glb         # or .gltf with its .bin and textures
 ```
 
@@ -70,6 +71,22 @@ Without assets the app still runs with the procedural background and placeholder
 Fit rules: compute the bounding box, center it at the origin, scale the longest edge to `3.35` scene units, then add a thin wireframe shell. Original materials, textures, and animations are preserved.
 
 See [docs/ASSETS.md](docs/ASSETS.md) for details.
+
+## Import from Wallpaper Engine
+
+| `project.json` type | Path |
+| --- | --- |
+| `video` | Imported directly as the animated background |
+| `web` | Copied to `public/wallpaper/`, then needs a compatibility pass |
+| `scene` | Unpack `scene.pkg` with RePKG, then port layers/materials/effects manually |
+| `application` | Native app; rebuild from its preview video instead |
+
+```bash
+npm run wallpaper -- "D:\SteamLibrary\steamapps\workshop\content\431960\123456789" --dry-run
+npm run wallpaper -- "D:\...\123456789"
+```
+
+The importer writes `public/assets/background.mp4` for video wallpapers. See [docs/ASSETS.md](docs/ASSETS.md).
 
 ## Build
 

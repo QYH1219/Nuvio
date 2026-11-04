@@ -2,6 +2,7 @@
 
 把素材放在这里，代码会自动探测：
 
+- 背景视频：`background.mp4` / `background.webm`（优先于静态图）
 - 背景图：`background.webp` / `background.png` / `background.jpg` / `background.jpeg`（任选其一，按此顺序）
 - 模型：`model.glb`，或 `model.gltf`（同级需要 `.bin` 与贴图）
 

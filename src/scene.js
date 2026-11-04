@@ -147,9 +147,38 @@ export class BackgroundEngine {
   }
 
   async setBackgroundImage(img) {
+    this.disposeBackgroundTexture();
     const texture = new THREE.Texture(img);
     texture.needsUpdate = true;
     this.background.setTexture(texture, img.width / img.height);
+    this.backgroundTexture = texture;
+    this.backgroundVideo = null;
+  }
+
+  async setBackgroundVideo(video) {
+    this.disposeBackgroundTexture();
+    const texture = new THREE.VideoTexture(video);
+    texture.needsUpdate = true;
+    this.background.setTexture(texture, video.videoWidth / video.videoHeight);
+    this.backgroundTexture = texture;
+    this.backgroundVideo = video;
+  }
+
+  disposeBackgroundTexture() {
+    if (this.backgroundVideo) {
+      try {
+        this.backgroundVideo.pause();
+        this.backgroundVideo.removeAttribute('src');
+        this.backgroundVideo.load();
+      } catch {
+        /* ignore */
+      }
+      this.backgroundVideo = null;
+    }
+    if (this.backgroundTexture) {
+      this.backgroundTexture.dispose();
+      this.backgroundTexture = null;
+    }
   }
 
   async loadModel(url, onProgress) {
@@ -252,6 +281,7 @@ export class BackgroundEngine {
     window.removeEventListener('pointermove', this._onPointerMove);
     document.removeEventListener('visibilitychange', this._onVisibility);
     this._resizeObserver.disconnect();
+    this.disposeBackgroundTexture();
     this.renderer.dispose();
     this.envRT.dispose();
     this.pmrem.dispose();

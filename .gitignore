@@ -5,6 +5,7 @@ _ref/
 
 # Generated at install/build time by tools/sync-decoders.mjs
 public/vendor/
+public/wallpaper/
 
 # User-supplied art and models
 public/assets/*

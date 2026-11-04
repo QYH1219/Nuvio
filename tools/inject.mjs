@@ -17,8 +17,11 @@ const MIME = {
   '.js': 'text/javascript; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
   '.ktx2': 'image/ktx2',
+  '.m4v': 'video/mp4',
+  '.mp4': 'video/mp4',
   '.png': 'image/png',
   '.wasm': 'application/wasm',
+  '.webm': 'video/webm',
   '.webp': 'image/webp',
 };
 

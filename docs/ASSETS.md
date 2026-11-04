@@ -21,6 +21,27 @@ Recommendations:
 
 The image is sampled by a fullscreen shader with cover-fit behavior, so non-16:9 images are cropped rather than stretched.
 
+## Background video
+
+Supported names, checked before any still image:
+
+```text
+public/assets/background.mp4
+public/assets/background.webm
+```
+
+- Muted, looping, inline playback; no controls and no audio autoplay.
+- Use H.264 MP4 for compatibility; WebM/VP9 is smaller but slower to decode on some machines.
+- 1080p60 or 1440p is plenty. 4K video costs a lot of VRAM when combined with bloom.
+- Keep clips under ~60 seconds and loop them with a matching first/last frame to hide the cut.
+- The same shader effects (parallax, dim, grain, bloom) apply on top of the video.
+
+Import a Wallpaper Engine video wallpaper:
+
+```bash
+npm run wallpaper -- "D:\SteamLibrary\steamapps\workshop\content\431960\<id>"
+```
+
 ## Models
 
 Supported names:

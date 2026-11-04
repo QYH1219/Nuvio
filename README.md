@@ -15,7 +15,7 @@
 ## 特性
 
 - **整窗背景层**：背景渲染在 Codex 窗口最底层，不遮挡交互，不接管鼠标事件。
-- **自定义背景图**：WebP / PNG / JPG，全屏 shader 采样，带缓慢漂移与视差。
+- **背景图 / 背景视频**：WebP / PNG / JPG，或 MP4 / WebM；全屏 shader 采样，带缓慢漂移与视差。
 - **Tripo / glTF 模型**：GLB、glTF 直接加载，自动居中、按包围盒缩放，兼容 Draco、Meshopt、KTX2。
 - **动态效果**：模型自转、鼠标倾斜、Bloom 辉光、粒子、暗角、颗粒、点击波纹。
 - **可调参数**：画质、动态强度、视差、辉光、颗粒、压暗、模型缩放/位置/自转、面板透明度。
@@ -65,6 +65,7 @@ npm run dev
 
 ```text
 public/assets/background.webp   # 或 .png / .jpg / .jpeg
+public/assets/background.mp4    # 或 .webm，优先于静态图
 public/assets/model.glb         # 或 .gltf（兄弟目录需带 .bin 和贴图）
 ```
 
@@ -73,6 +74,39 @@ public/assets/model.glb         # 或 .gltf（兄弟目录需带 .bin 和贴图�
 模型适配规则：读取包围盒 → 居中到原点 → 最大边缩放到场景单位 `3.35` → 叠加边缘线框壳。模型本身的材质、贴图、动画会保留。
 
 更细的素材规范见 [docs/ASSETS.md](docs/ASSETS.md)。
+
+## 从 Wallpaper Engine 复刻
+
+Wallpaper Engine 的壁纸分三类，处理方式不同：
+
+| `project.json` 的 `type` | 复刻方式 |
+| --- | --- |
+| `video` | 直接导入，作为动态背景播放；可叠加视差、辉光、粒子、模型 |
+| `web` | 先复制到 `public/wallpaper/`，再做一轮兼容处理（属性监听 / audio / 交互） |
+| `scene` | 用 RePKG 解开 `scene.pkg`，把图层、材质、特效手工移植到 Three.js，无法一键完美还原 |
+| `application` | 原生程序，不能嵌入；用它的预览视频重建 |
+
+找到壁纸目录（Steam 库）：
+
+```text
+...\steamapps\workshop\content\431960\<壁纸ID>\
+```
+
+先看类型，不复制：
+
+```bash
+npm run wallpaper -- "D:\SteamLibrary\steamapps\workshop\content\431960\123456789" --dry-run
+```
+
+视频壁纸直接导入：
+
+```bash
+npm run wallpaper -- "D:\...\123456789"
+```
+
+会自动放到 `public/assets/background.mp4`，刷新页面即可。加 `--force` 覆盖已有文件。
+
+Scene / Web 类型把目录整个发我，或者把 `project.json`、`preview.jpg`、`scene.json`（RePKG 解包后）丢过来，我按图层重建。
 
 ## 构建
 
@@ -251,6 +285,7 @@ window.addEventListener('cxdbg-ready', (event) => {
 ├─ tools/
 │  ├─ inject.mjs         # CDP 注入器 + 本地素材服务器
 │  ├─ sync-decoders.mjs  # 复制 Draco / Basis 解码器
+│  ├─ wallpaper.mjs      # Wallpaper Engine 壁纸导入 / 类型识别
 │  ├─ launch-codex.ps1
 │  └─ launch-codex.sh
 ├─ public/assets/        # 你的背景图与模型（默认不提交）
