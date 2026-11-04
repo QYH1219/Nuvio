@@ -3,6 +3,7 @@ import {
   probeAssets,
   loadImage,
   loadVideo,
+  loadSceneWallpaper,
   startVideo,
   createFallbackBackground,
 } from './assets.js';
@@ -107,6 +108,7 @@ export async function mount(host, options = {}) {
     videoUrl: null,
     imageUrl: null,
     modelUrl: null,
+    sceneUrl: null,
     background: 'placeholder',
     model: 'placeholder',
   };
@@ -126,7 +128,18 @@ export async function mount(host, options = {}) {
         assets.videoUrl = null;
       }
     }
-    if (assets.background !== 'video' && probed.imageUrl) {
+    if (assets.background !== 'video' && probed.sceneUrl) {
+      try {
+        const scene = await loadSceneWallpaper(probed.sceneUrl);
+        engine.setSceneWallpaper(scene);
+        assets.background = 'scene';
+        assets.scene = scene.meta;
+      } catch (error) {
+        console.warn('[codex-bg] scene wallpaper failed, trying image', error);
+        assets.sceneUrl = null;
+      }
+    }
+    if (assets.background !== 'video' && assets.background !== 'scene' && probed.imageUrl) {
       try {
         const img = await loadImage(probed.imageUrl);
         await engine.setBackgroundImage(img);
@@ -136,7 +149,7 @@ export async function mount(host, options = {}) {
         await engine.setBackgroundImage(createFallbackBackground());
         assets.background = 'placeholder';
       }
-    } else if (assets.background !== 'video') {
+    } else if (assets.background !== 'video' && assets.background !== 'scene') {
       await engine.setBackgroundImage(createFallbackBackground());
       assets.background = 'placeholder';
     }
@@ -150,6 +163,8 @@ export async function mount(host, options = {}) {
     `背景 ${
       assets.background === 'video'
         ? '视频'
+        : assets.background === 'scene'
+          ? '场景壁纸'
         : assets.background === 'image'
           ? '自定义图'
           : '程序化'
@@ -176,6 +191,8 @@ export async function mount(host, options = {}) {
     `背景 ${
       assets.background === 'video'
         ? '视频'
+        : assets.background === 'scene'
+          ? '场景壁纸'
         : assets.background === 'image'
           ? '自定义图'
           : '程序化'

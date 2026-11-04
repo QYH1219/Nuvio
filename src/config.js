@@ -11,6 +11,8 @@ export const DEFAULTS = {
   modelSpin: 0.35,
   modelX: 0.18,
   modelY: -0.02,
+  sceneShake: 1,
+  sceneSway: 1,
   particles: true,
   codexMock: true,
   surfaceOpacity: 0.45,

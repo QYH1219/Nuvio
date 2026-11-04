@@ -164,6 +164,12 @@ export class BackgroundEngine {
     this.backgroundVideo = video;
   }
 
+  /** Replay a Wallpaper Engine scene wallpaper (effect chain + parallax). */
+  setSceneWallpaper(data) {
+    this.disposeBackgroundTexture();
+    this.background.setSceneWallpaper(data);
+  }
+
   disposeBackgroundTexture() {
     if (this.backgroundVideo) {
       try {
@@ -178,6 +184,9 @@ export class BackgroundEngine {
     if (this.backgroundTexture) {
       this.backgroundTexture.dispose();
       this.backgroundTexture = null;
+    }
+    if (this.background.mode === 'scene') {
+      this.background.disposeSceneMaterial();
     }
   }
 
@@ -282,6 +291,7 @@ export class BackgroundEngine {
     document.removeEventListener('visibilitychange', this._onVisibility);
     this._resizeObserver.disconnect();
     this.disposeBackgroundTexture();
+    this.background.dispose();
     this.renderer.dispose();
     this.envRT.dispose();
     this.pmrem.dispose();

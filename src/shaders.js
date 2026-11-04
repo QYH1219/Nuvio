@@ -160,6 +160,182 @@ export const particleFragment = /* glsl */ `
   }
 `;
 
+/*
+ * Wallpaper Engine "scene" reproduction.
+ *
+ * This is a direct port of the two effect shaders used by the imported
+ * wallpaper: effects/shake (flow-map UV shake) and effects/foliagesway
+ * (MODE=0, noise + sine UV distortion). Math and defaults mirror the
+ * original .frag/.vert files; the image is sampled in screen space so the
+ * background keeps cover-fit on any window aspect ratio.
+ */
+export const sceneVertex = /* glsl */ `
+  varying vec2 vUv;
+  void main() {
+    vUv = uv;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+export const sceneFragment = /* glsl */ `
+  precision highp float;
+
+  uniform sampler2D uTex;
+  uniform sampler2D uShake0;
+  uniform sampler2D uShake1;
+  uniform sampler2D uShake2;
+
+  uniform float uTime;
+  uniform float uParallax;
+  uniform float uDim;
+  uniform float uScreenAspect;
+  uniform float uImageAspect;
+  uniform vec2 uResolution;
+  uniform vec2 uMouse;
+
+  uniform float uShakeAmount;
+  uniform float uSwayAmount;
+  uniform float uMaskScale;
+  uniform float uShakeSpeed;
+  uniform float uShakeStrength;
+  uniform vec2 uShakeFriction;
+  uniform vec2 uShakeBounds;
+
+  uniform float uSwaySpeed;
+  uniform float uSwayStrength;
+  uniform float uSwayPhase;
+  uniform float uSwayPower;
+  uniform float uSwayRatio;
+  uniform float uSwayScale;
+  uniform float uSwayDirection;
+
+  varying vec2 vUv;
+
+  const float PI = 3.14159265359;
+  const float HALF_PI = 1.57079632679;
+  const float TEX_MARGIN = 0.952; // scene object scale 1.05
+
+  float hash21(vec2 p) {
+    p = fract(p * vec2(123.34, 345.45));
+    p += dot(p, p + 34.345);
+    return fract(p.x * p.y);
+  }
+
+  float valueNoise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    float a = hash21(i);
+    float b = hash21(i + vec2(1.0, 0.0));
+    float c = hash21(i + vec2(0.0, 1.0));
+    float d = hash21(i + vec2(1.0, 1.0));
+    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+  }
+
+  // Stand-in for Wallpaper Engine's util/noise; only the green channel is
+  // consumed by foliagesway, so a smooth scalar fbm is enough.
+  float fbm(vec2 p) {
+    float v = 0.0;
+    float a = 0.5;
+    for (int i = 0; i < 3; i++) {
+      v += a * valueNoise(p);
+      p = p * 2.02 + 17.3;
+      a *= 0.5;
+    }
+    return v / 0.875;
+  }
+
+  vec2 rotateUv(vec2 v, float a) {
+    float c = cos(a);
+    float s = sin(a);
+    return vec2(c * v.x - s * v.y, s * v.x + c * v.y);
+  }
+
+  vec2 coverUv(vec2 uv, float screenAspect, float imageAspect) {
+    if (screenAspect > imageAspect) {
+      uv.y = (uv.y - 0.5) * (imageAspect / screenAspect) + 0.5;
+    } else {
+      uv.x = (uv.x - 0.5) * (screenAspect / imageAspect) + 0.5;
+    }
+    return uv;
+  }
+
+  /*
+   * effects/shake.vert scales the flow-map lookup by maskSize / imageSize;
+   * the mask here is half-resolution, so uMaskScale is ~0.5.
+   */
+  vec2 shakeOffset(vec2 uv, sampler2D flowMap) {
+    vec2 flowColors = texture2D(flowMap, uv * uMaskScale).rg;
+    vec2 flowMask = (flowColors - vec2(0.498)) * 2.0;
+
+    float time = uShakeSpeed * uTime;
+    float offset = sin(fract(time / HALF_PI) * HALF_PI);
+    offset = offset * 0.498 + 0.5;
+    float base = step(0.0, cos(time));
+    offset = mix(
+      1.0 - pow(1.0 - offset, uShakeFriction.x),
+      pow(offset, uShakeFriction.y),
+      base
+    );
+    offset = clamp((offset - uShakeBounds.x) / max(uShakeBounds.y - uShakeBounds.x, 1e-5), 0.0, 1.0);
+    offset = offset * 2.0 - 1.0; // DIRECTION == center
+
+    return offset * uShakeStrength * uShakeStrength * flowMask;
+  }
+
+  // effects/foliagesway with MODE == 0 (UV distortion) and MASK disabled.
+  vec2 swayOffset(vec2 uv) {
+    // The original samples util/noise at uv * scale. Keep the parameter live
+    // and map it onto the same low-frequency range for the procedural noise.
+    float noise = fbm(uv * max(uSwayScale * 60.0, 0.25) + 11.7);
+    float amp = uSwayStrength * uSwayStrength * 0.005;
+    vec2 rotated = rotateUv(uv, uSwayDirection);
+    float phase = (noise * PI * 2.0 + rotated.x * 10.0 + rotated.y * 5.0) * uSwayPhase;
+
+    float time = uSwaySpeed * uTime;
+    vec4 sines = sin(phase + time * vec4(1.0, -0.16161616, 0.0083333, -0.00019841));
+    vec4 csines = sin(0.4 + phase + time * vec4(-0.5, 0.041666666, -0.0013888889, 0.000024801587));
+
+    sines = pow(abs(sines), vec4(uSwayPower)) * sign(sines);
+    csines = pow(abs(csines), vec4(uSwayPower)) * sign(csines);
+
+    float aspect = uImageAspect * uSwayRatio;
+    vec2 dir = rotateUv(vec2(1.0 / aspect, aspect), uSwayDirection);
+    vec2 offset = vec2(
+      dir.x * dot(sines, vec4(amp)),
+      dir.y * dot(csines, vec4(amp))
+    );
+    return offset * uSwayAmount;
+  }
+
+  void main() {
+    // Screen-space UV: independent of the (enlarged) background quad, so the
+    // artwork fills the window exactly like Wallpaper Engine's ortho camera.
+    vec2 screenUv = gl_FragCoord.xy / max(uResolution, vec2(1.0));
+    screenUv.y = 1.0 - screenUv.y; // top-left origin, matching WE texture space
+
+    vec2 uv = coverUv(screenUv, uScreenAspect, uImageAspect);
+    uv = (uv - 0.5) * TEX_MARGIN + 0.5;
+
+    // cameraparallax: amount 0.1, mouseinfluence 0.5 (normalized to taste).
+    uv += uMouse * vec2(0.012, 0.0085) * uParallax;
+
+    // Effect chain from scene.json is applied last-to-first, because each
+    // pass samples the previous render target.
+    uv += shakeOffset(uv, uShake2);
+    uv += shakeOffset(uv, uShake1);
+    uv += shakeOffset(uv, uShake0);
+    uv += swayOffset(uv);
+
+    vec3 col = texture2D(uTex, uv).rgb;
+    col *= 1.0 - uDim * 0.62;
+
+    gl_FragColor = vec4(col, 1.0);
+    #include <tonemapping_fragment>
+    #include <colorspace_fragment>
+  }
+`;
+
 export const gradeShader = {
   uniforms: {
     tDiffuse: { value: null },

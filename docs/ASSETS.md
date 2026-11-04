@@ -42,6 +42,49 @@ Import a Wallpaper Engine video wallpaper:
 npm run wallpaper -- "D:\SteamLibrary\steamapps\workshop\content\431960\<id>"
 ```
 
+## Scene wallpapers
+
+Scene wallpapers are imported into a normalized directory:
+
+```text
+public/assets/wallpaper/
+  scene.json              normalized pipeline + source metadata
+  scene.jpg               artwork
+  mask_shake_*.png        flow maps for shake passes
+  mask_foliagesway_*.png  optional foliage mask
+```
+
+Import the wallpaper currently selected in Wallpaper Engine, or target it by ID/folder:
+
+```bash
+npm run wallpaper -- --current
+npm run wallpaper -- 3806385218
+npm run wallpaper -- "D:\SteamLibrary\steamapps\workshop\content\431960\3806385218"
+```
+
+The importer locates Steam and RePKG automatically. If RePKG is installed somewhere else:
+
+```bash
+npm run wallpaper -- --current --repkg "C:\Tools\RePKG\RePKG.exe"
+```
+
+If the `.pkg` is already unpacked:
+
+```bash
+npm run wallpaper -- --scene "C:\path\to\unpacked-scene"
+```
+
+Supported effect ports:
+
+| Effect | Behavior |
+| --- | --- |
+| `shake` | Flow-map UV offset with Wallpaper Engine timing, friction, bounds, and strength |
+| `foliagesway` | MODE 0 UV distortion with phase, power, ratio, direction, and strength |
+
+Other effects are listed during import and skipped; the artwork still loads as a still background. Use `--force` to re-extract and overwrite existing output.
+
+Scene wallpapers are user-supplied third-party artwork. Do not publish imported assets unless the license allows redistribution; `public/assets/*` is ignored by Git.
+
 ## Models
 
 Supported names:

@@ -15,7 +15,8 @@
 ## 特性
 
 - **整窗背景层**：背景渲染在 Codex 窗口最底层，不遮挡交互，不接管鼠标事件。
-- **背景图 / 背景视频**：WebP / PNG / JPG，或 MP4 / WebM；全屏 shader 采样，带缓慢漂移与视差。
+- **背景图 / 背景视频 / 场景壁纸**：WebP / PNG / JPG、MP4 / WebM，或 Wallpaper Engine `scene` 壁纸；全屏 shader 采样，带缓慢漂移与视差。
+- **场景效果回放**：自动解包 `scene.pkg`，支持 `shake` 流体抖动和 `foliagesway` 植被摆动的 shader 复刻。
 - **Tripo / glTF 模型**：GLB、glTF 直接加载，自动居中、按包围盒缩放，兼容 Draco、Meshopt、KTX2。
 - **动态效果**：模型自转、鼠标倾斜、Bloom 辉光、粒子、暗角、颗粒、点击波纹。
 - **可调参数**：画质、动态强度、视差、辉光、颗粒、压暗、模型缩放/位置/自转、面板透明度。
@@ -67,6 +68,7 @@ npm run dev
 public/assets/background.webp   # 或 .png / .jpg / .jpeg
 public/assets/background.mp4    # 或 .webm，优先于静态图
 public/assets/model.glb         # 或 .gltf（兄弟目录需带 .bin 和贴图）
+public/assets/wallpaper/scene.json  # 由 wallpaper 导入器生成
 ```
 
 没有素材也能直接跑，会用程序化背景和占位模型。
@@ -83,7 +85,7 @@ Wallpaper Engine 的壁纸分三类，处理方式不同：
 | --- | --- |
 | `video` | 直接导入，作为动态背景播放；可叠加视差、辉光、粒子、模型 |
 | `web` | 先复制到 `public/wallpaper/`，再做一轮兼容处理（属性监听 / audio / 交互） |
-| `scene` | 用 RePKG 解开 `scene.pkg`，把图层、材质、特效手工移植到 Three.js，无法一键完美还原 |
+| `scene` | 自动用 RePKG 解开 `scene.pkg`，导出主图和效果 mask；支持 `shake` / `foliagesway` 两类 shader |
 | `application` | 原生程序，不能嵌入；用它的预览视频重建 |
 
 找到壁纸目录（Steam 库）：
@@ -98,15 +100,26 @@ Wallpaper Engine 的壁纸分三类，处理方式不同：
 npm run wallpaper -- "D:\SteamLibrary\steamapps\workshop\content\431960\123456789" --dry-run
 ```
 
-视频壁纸直接导入：
+导入当前正在使用的壁纸：
 
 ```bash
-npm run wallpaper -- "D:\...\123456789"
+npm run wallpaper -- --current
 ```
 
-会自动放到 `public/assets/background.mp4`，刷新页面即可。加 `--force` 覆盖已有文件。
+或按 workshop ID / 目录导入：
 
-Scene / Web 类型把目录整个发我，或者把 `project.json`、`preview.jpg`、`scene.json`（RePKG 解包后）丢过来，我按图层重建。
+```bash
+npm run wallpaper -- 3806385218
+npm run wallpaper -- "D:\SteamLibrary\steamapps\workshop\content\431960\3806385218"
+```
+
+- 视频壁纸写到 `public/assets/background.mp4|webm`。
+- 场景壁纸写到 `public/assets/wallpaper/`，生成 `scene.json`、主图和 mask。
+- 导入器会自动查找 Steam / Wallpaper Engine / RePKG；也可用 `--repkg` 指定 RePKG.exe。
+- 已解包的 scene 目录可直接用 `--scene <目录>` 导入，不需要再次解包。
+- 加 `--force` 覆盖已有输出。
+
+当前场景 shader 复刻支持 `shake` 和 `foliagesway`；其他效果会在导入时列出并跳过，主图仍会作为静态背景加载。素材版权归原作者，`public/assets/*` 默认不提交到仓库。
 
 ## 构建
 
@@ -230,6 +243,8 @@ npm run inject -- --no-serve --asset-base https://cdn.example.com/bg/
 | `modelScale` | `1` | 模型整体缩放 |
 | `modelSpin` | `0.35` | 模型自转速度 |
 | `modelX` / `modelY` | `0.18` / `-0.02` | 模型屏幕位置偏移 |
+| `sceneShake` | `1` | 场景壁纸抖动强度 |
+| `sceneSway` | `1` | 场景壁纸植被摆动强度 |
 | `particles` | `true` | 粒子开关 |
 | `codexMock` | `true` | 预览站是否显示 mock 界面 |
 | `surfaceOpacity` | `0.45` | Codex 面板透明度基准 |
@@ -248,7 +263,7 @@ cxdBg.reset();
 
 // 当前素材探测结果
 console.log(cxdBg.assets);
-// { imageUrl, modelUrl, background: 'image'|'placeholder', model: 'glb'|'placeholder' }
+// { imageUrl, modelUrl, sceneUrl, background: 'video'|'scene'|'image'|'placeholder', model: 'glb'|'placeholder' }
 
 // 卸载背景层
 cxdBg.dispose();
@@ -280,6 +295,7 @@ window.addEventListener('cxdbg-ready', (event) => {
 │  ├─ style.css
 │  └─ scene/
 │     ├─ background.js
+│     ├─ wallpaper.js    # scene 壁纸 shader + 效果链
 │     ├─ model.js        # GLB 加载、自动适配、自转
 │     └─ particles.js
 ├─ tools/

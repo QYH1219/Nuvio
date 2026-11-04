@@ -9,6 +9,8 @@ const MODEL_CANDIDATES = ['assets/model.glb', 'assets/model.gltf'];
 
 const VIDEO_CANDIDATES = ['assets/background.mp4', 'assets/background.webm'];
 
+const SCENE_CANDIDATES = ['assets/wallpaper/scene.json'];
+
 export function assetBaseUrl() {
   return window.__CXD_ASSET_BASE__ || './';
 }
@@ -46,6 +48,7 @@ export async function probeAssets() {
     videoUrl: explicit.videoUrl || explicit.video || null,
     imageUrl: explicit.imageUrl || explicit.background || null,
     modelUrl: explicit.modelUrl || explicit.model || null,
+    sceneUrl: explicit.sceneUrl || explicit.scene || null,
   };
 
   if (!result.videoUrl) {
@@ -75,7 +78,71 @@ export async function probeAssets() {
       }
     }
   }
+  if (!result.sceneUrl) {
+    for (const path of SCENE_CANDIDATES) {
+      const url = join(base, path);
+      if (await exists(url)) {
+        result.sceneUrl = url;
+        break;
+      }
+    }
+  }
   return result;
+}
+
+async function loadSceneJson(url) {
+  const res = await fetch(url, { cache: 'no-store' });
+  if (!res.ok) throw new Error(`scene json failed: ${url}`);
+  const data = await res.json();
+  if (!data || !data.image) throw new Error(`scene json has no image: ${url}`);
+  return data;
+}
+
+function resolveAsset(name, sceneUrl) {
+  if (/^https?:|^data:|^blob:/.test(name)) return name;
+  const absolute = new URL(sceneUrl, location.href);
+  return new URL(name, new URL('.', absolute)).href;
+}
+
+/**
+ * Load a normalized scene wallpaper produced by `tools/wallpaper.mjs`.
+ * Only `shake` masks are consumed; foliagesway uses MASK=0 in the source
+ * wallpaper, so its mask is decorative metadata.
+ */
+export async function loadSceneWallpaper(url) {
+  const data = await loadSceneJson(url);
+  const imageUrl = resolveAsset(data.image, url);
+  const image = await loadImage(imageUrl);
+
+  const pipeline = Array.isArray(data.pipeline) ? data.pipeline : [];
+  const shakes = pipeline.filter((entry) => entry && entry.type === 'shake').slice(0, 3);
+  const sway = pipeline.find((entry) => entry && entry.type === 'foliagesway') || null;
+
+  const resolvedShakes = [];
+  for (const entry of shakes) {
+    let maskImage = null;
+    if (entry.mask) {
+      try {
+        maskImage = await loadImage(resolveAsset(entry.mask, url));
+      } catch (error) {
+        console.warn('[codex-bg] shake mask failed', entry.mask, error);
+      }
+    }
+    resolvedShakes.push({ ...entry, image: maskImage });
+  }
+
+  return {
+    image,
+    pipeline: [
+      ...(sway ? [sway] : []),
+      ...resolvedShakes.map(({ image: maskImage, ...entry }) => ({
+        ...entry,
+        image: maskImage,
+      })),
+    ],
+    meta: data.source || {},
+    camera: data.camera || {},
+  };
 }
 
 export function loadImage(url) {

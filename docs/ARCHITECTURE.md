@@ -7,7 +7,8 @@ Codex renderer (Electron)
 ├─ #cxd-bg-root                 injected host, fixed inset 0, z-index -1
 │  └─ .cxd-root                 WebGL canvas + HUD + mock + panel
 │     ├─ BackgroundEngine       three.js renderer / scene / loop
-│     │  ├─ background.js       fullscreen shader plane
+│     │  ├─ background.js       fullscreen image/video/scene shader plane
+│     │  ├─ wallpaper.js        Wallpaper Engine shake + foliage sway material
 │     │  ├─ model.js            GLB loader + auto fit + placeholder
 │     │  └─ particles.js        GPU points
 │     └─ post.js                bloom + grade pass
@@ -39,6 +40,8 @@ mount()
  ├─ apply URL overrides           mock / panel / embed
  ├─ new BackgroundEngine()        renderer, camera, post, particles
  ├─ probeAssets()                 HEAD requests for known filenames
+ ├─ setBackgroundVideo()          MP4/WebM texture (highest priority)
+ ├─ setSceneWallpaper()           Wallpaper Engine scene material + effect masks
  ├─ setBackgroundImage()          custom image or procedural canvas
  ├─ loadModel()                   GLB/glTF, 15s timeout, fallback to placeholder
  ├─ engine.setConfig()            apply visual parameters
@@ -51,12 +54,12 @@ mount()
 
 ## Render pipeline
 
-1. Background plane: fullscreen shader sampling the background texture with drift, vignette, and mouse parallax.
+1. Background plane: fullscreen shader sampling image/video, or the `SceneWallpaperMaterial` replaying imported `shake`/`foliagesway` passes.
 2. Model: GLTF scene centered and normalized to 3.35 units, plus a wireframe shell for edge glow.
 3. Particles: `THREE.Points` with additive blending.
 4. Post: `UnrealBloomPass` then a custom grade shader (grain, vignette, color grade).
 
-The background plane accepts a `THREE.Texture` or a `THREE.VideoTexture`. Video takes priority over a still image; both feed the same shader, so parallax, dim, grain, and motion apply identically. `BackgroundEngine.disposeBackgroundTexture()` pauses and releases the video element.
+The background plane accepts a `THREE.Texture`, `THREE.VideoTexture`, or a scene material. Asset priority is `video > scene > image > procedural`. Scene wallpapers sample the artwork in screen space so the imported UV masks remain aligned while the background plane is cover-fitted. `BackgroundEngine.disposeBackgroundTexture()` pauses and releases video, image, and scene resources.
 
 Quality presets change device pixel ratio, bloom enablement, particle count scale, and shadow usage.
 

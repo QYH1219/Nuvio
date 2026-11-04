@@ -22,6 +22,8 @@ const SECTIONS = [
     controls: [
       { type: 'range', key: 'motion', label: '动态强度', min: 0, max: 2, step: 0.01 },
       { type: 'range', key: 'parallax', label: '视差幅度', min: 0, max: 2, step: 0.01 },
+      { type: 'range', key: 'sceneShake', label: '场景抖动', min: 0, max: 2, step: 0.01 },
+      { type: 'range', key: 'sceneSway', label: '场景摆动', min: 0, max: 2, step: 0.01 },
       { type: 'range', key: 'modelSpin', label: '模型自转', min: 0, max: 1.5, step: 0.01 },
     ],
   },

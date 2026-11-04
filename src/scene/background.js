@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { backgroundVertex, backgroundFragment } from '../shaders.js';
+import { SceneWallpaperMaterial } from './wallpaper.js';
 
 export class BackgroundLayer {
   constructor(scene, renderer) {
@@ -32,9 +33,14 @@ export class BackgroundLayer {
     this.mesh.renderOrder = -100;
     this.mesh.frustumCulled = false;
     scene.add(this.mesh);
+
+    this.mode = 'image';
+    this.imageMaterial = this.mesh.material;
+    this.sceneMaterial = null;
   }
 
   setTexture(texture, imageAspect) {
+    this.disposeSceneMaterial();
     texture.colorSpace = THREE.SRGBColorSpace;
     texture.anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
     texture.minFilter = THREE.LinearFilter;
@@ -46,12 +52,32 @@ export class BackgroundLayer {
     this.uniforms.uImageAspect.value = this.aspect;
   }
 
+  /** Replay a Wallpaper Engine scene effect chain (shake + foliage sway). */
+  setSceneWallpaper(data) {
+    this.disposeSceneMaterial();
+    this.sceneMaterial = new SceneWallpaperMaterial(data, this.renderer);
+    this.mesh.material = this.sceneMaterial;
+    this.mode = 'scene';
+    this.aspect = data.image.width / data.image.height;
+    this.resize(this.cameraRef, this.width || 1280, this.height || 720);
+  }
+
+  setCameraRef(camera) {
+    this.cameraRef = camera;
+  }
+
   resize(camera, width, height) {
+    this.cameraRef = camera;
+    this.width = width;
+    this.height = height;
     const distance = camera.position.z - this.mesh.position.z;
     const visibleHeight = 2 * Math.tan((camera.fov * Math.PI) / 360) * distance;
     const visibleWidth = visibleHeight * (width / height);
     this.mesh.scale.set(visibleWidth * 1.55, visibleHeight * 1.55, 1);
     this.uniforms.uScreenAspect.value = width / height;
+    if (this.sceneMaterial) {
+      this.sceneMaterial.resize(camera, width, height, this.renderer.getPixelRatio());
+    }
   }
 
   update(time, mouse, config) {
@@ -61,5 +87,23 @@ export class BackgroundLayer {
     this.uniforms.uDim.value = config.dim;
     this.uniforms.uGrain.value = config.grain;
     this.uniforms.uMotion.value = config.motion;
+    if (this.sceneMaterial) {
+      this.sceneMaterial.update(time, mouse, config);
+    }
+  }
+
+  disposeSceneMaterial() {
+    if (!this.sceneMaterial) return;
+    this.mesh.material = this.imageMaterial;
+    this.sceneMaterial.disposeTextures();
+    this.sceneMaterial.dispose();
+    this.sceneMaterial = null;
+    this.mode = 'image';
+  }
+
+  dispose() {
+    this.disposeSceneMaterial();
+    this.mesh.geometry.dispose();
+    this.mesh.material.dispose();
   }
 }
