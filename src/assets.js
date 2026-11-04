@@ -168,7 +168,11 @@ export async function loadSceneWallpaper(url, inlineData = null) {
 
   const pipeline = Array.isArray(data.pipeline) ? data.pipeline : [];
   const cache = new Map();
-  const loadRef = async (ref) => {
+  // A missing effect texture used to be a console.warn nobody reads. Keep the
+  // failure and report it in the panel, otherwise a scene silently loses its
+  // water ripple and looks "broken" with no explanation.
+  const missing = new Map();
+  const loadRef = async (ref, role) => {
     if (!ref) return null;
     const absolute = resolveAsset(ref, url);
     if (!cache.has(absolute)) {
@@ -176,6 +180,13 @@ export async function loadSceneWallpaper(url, inlineData = null) {
         absolute,
         loadImage(absolute).catch((error) => {
           console.warn('[codex-bg] scene texture failed', ref, error);
+          if (!missing.has(absolute)) {
+            missing.set(absolute, {
+              role: role || 'texture',
+              url: absolute,
+              name: fileNameOf(absolute),
+            });
+          }
           return null;
         }),
       );
@@ -188,9 +199,9 @@ export async function loadSceneWallpaper(url, inlineData = null) {
     if (!entry || !entry.type) continue;
     const refs = entry.textures || (entry.mask ? { mask: entry.mask } : {});
     const [mask, normal, phase] = await Promise.all([
-      loadRef(refs.mask),
-      loadRef(refs.normal),
-      loadRef(refs.phase),
+      loadRef(refs.mask, 'mask'),
+      loadRef(refs.normal, 'normal'),
+      loadRef(refs.phase, 'phase'),
     ]);
     resolved.push({
       type: entry.type,
@@ -205,7 +216,19 @@ export async function loadSceneWallpaper(url, inlineData = null) {
     pipeline: resolved,
     meta: data.source || {},
     camera: data.camera || {},
+    missingTextures: [...missing.values()],
   };
+}
+
+function fileNameOf(url) {
+  const raw = String(url || '');
+  const tail = raw.split(/[\\/]/).pop() || raw;
+  const clean = tail.split(/[?#]/)[0];
+  try {
+    return decodeURIComponent(clean);
+  } catch {
+    return clean;
+  }
 }
 
 export function loadImage(url) {

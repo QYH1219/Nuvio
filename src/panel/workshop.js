@@ -21,6 +21,8 @@ const POLL_MS = 800;
 export function createWorkshopSection(options = {}) {
   const onApplied = options.onApplied || (() => {});
   const onMessage = options.onMessage || (() => {});
+  const isFavorite = options.isFavorite || (() => false);
+  const onToggleFavorite = options.onToggleFavorite || null;
 
   const el = document.createElement('div');
   el.className = 'cxd-workshop';
@@ -37,6 +39,7 @@ export function createWorkshopSection(options = {}) {
         <option value="video">视频</option>
         <option value="scene">场景</option>
         <option value="web">网页</option>
+        <option value="favorite">★ 收藏</option>
       </select>
     </div>
     <div class="cxd-workshop-list" data-list></div>
@@ -66,7 +69,11 @@ export function createWorkshopSection(options = {}) {
     const query = search.value.trim().toLowerCase();
     const type = filter.value;
     return entries.filter((entry) => {
-      if (type !== 'all' && entry.type !== type) return false;
+      if (type === 'favorite') {
+        if (!isFavorite(entry.id)) return false;
+      } else if (type !== 'all' && entry.type !== type) {
+        return false;
+      }
       if (!query) return true;
       return String(entry.title || '').toLowerCase().includes(query);
     });
@@ -139,6 +146,21 @@ export function createWorkshopSection(options = {}) {
       if (entry.type === 'web') action.title = '以沙盒 iframe 渲染网页壁纸';
       action.addEventListener('click', () => use(entry));
 
+      const fav = document.createElement('button');
+      fav.type = 'button';
+      const favorited = Boolean(isFavorite(entry.id));
+      fav.className = 'cxd-ws-fav' + (favorited ? ' on' : '');
+      fav.textContent = favorited ? '★' : '☆';
+      fav.title = favorited ? '取消收藏（轮播优先使用收藏）' : '收藏（轮播优先使用收藏）';
+      fav.setAttribute('aria-pressed', String(favorited));
+      fav.setAttribute('aria-label', `${favorited ? '取消收藏' : '收藏'} ${entry.title || entry.id}`);
+      fav.disabled = !onToggleFavorite;
+      fav.addEventListener('click', () => {
+        if (!onToggleFavorite) return;
+        onToggleFavorite(entry.id);
+        render();
+      });
+
       const remove = document.createElement('button');
       remove.type = 'button';
       remove.className = 'cxd-asset-clear';
@@ -148,7 +170,7 @@ export function createWorkshopSection(options = {}) {
       remove.disabled = !entry.imported || Boolean(busy);
       remove.addEventListener('click', () => removeEntry(entry));
 
-      card.append(thumb, meta, action, remove);
+      card.append(thumb, meta, fav, action, remove);
       frag.appendChild(card);
     });
     list.appendChild(frag);

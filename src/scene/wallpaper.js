@@ -103,6 +103,12 @@ export class SceneWallpaperMaterial extends THREE.ShaderMaterial {
     const pipeline = Array.isArray(data.pipeline) ? data.pipeline : [];
     const image = data.image;
     if (!image) throw new Error('scene wallpaper: missing image');
+    // Files the loader could not fetch, plus passes this shader had to drop.
+    // `stats()` surfaces both so the panel can explain a "flat" scene.
+    const missingTextures = Array.isArray(data.missingTextures)
+      ? data.missingTextures.map((entry) => ({ ...entry }))
+      : [];
+    const skippedEffects = [];
 
     const uniforms = {
       uTex: { value: makeTexture(image, true, renderer, false, ARTWORK_TEXTURE_EDGE) },
@@ -134,6 +140,7 @@ export class SceneWallpaperMaterial extends THREE.ShaderMaterial {
       if (modes.has(key)) return modes.get(key);
       if (created.length >= MAX_TEXTURES) {
         console.warn('[codex-bg] scene texture budget reached, dropping effect');
+        skippedEffects.push({ type: 'texture-budget', reason: 'texture-budget' });
         return null;
       }
       const texture = makeTexture(source, srgb, renderer, repeat, EFFECT_TEXTURE_EDGE);
@@ -161,10 +168,12 @@ export class SceneWallpaperMaterial extends THREE.ShaderMaterial {
 
       if (entry.type === 'waterripple' && !normal) {
         console.warn('[codex-bg] waterripple needs a normal map, skipping');
+        skippedEffects.push({ type: entry.type, reason: 'missing-normal' });
         continue;
       }
       if (entry.type === 'waterflow' && (!mask || !phase)) {
         console.warn('[codex-bg] waterflow needs a flow mask and phase map, skipping');
+        skippedEffects.push({ type: entry.type, reason: 'missing-flow-texture' });
         continue;
       }
 
@@ -272,6 +281,8 @@ export class SceneWallpaperMaterial extends THREE.ShaderMaterial {
     this.textures = created;
     this.imageAspect = image.width / image.height;
     this.effectTypes = stages.map((stage) => stage.type);
+    this.missingTextures = missingTextures;
+    this.skippedEffects = skippedEffects;
   }
 
   resize(_camera, width, height, pixelRatio = 1) {

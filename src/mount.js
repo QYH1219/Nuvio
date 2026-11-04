@@ -28,6 +28,7 @@ import {
 } from './library.js';
 import { BackgroundEngine } from './scene.js';
 import { PerfGovernor } from './perf.js';
+import { applyWorkshop, hasWorkshopApi, listWorkshop, previewUrl } from './workshop.js';
 import {
   THEMES,
   READABILITY,
@@ -37,6 +38,7 @@ import {
   applyWallpaperLook,
 } from './presets.js';
 import { createHud, createHints, createPanel, createMock } from './ui.js';
+import { nextRotationEntry } from './rotation.js';
 
 const params = new URLSearchParams(location.search);
 
@@ -100,6 +102,20 @@ function sanitizeConfigPatch(input) {
     if (key === 'showPanel') return;
     if (!Object.prototype.hasOwnProperty.call(input, key)) return;
     const value = input[key];
+
+    // The only array in the config: workshop ids used by the rotation pool and
+    // the star filter. It needs its own branch because objects are rejected
+    // below for import safety.
+    if (key === 'favoriteIds') {
+      if (!Array.isArray(value)) return;
+      patch.favoriteIds = [...new Set(
+        value
+          .map((id) => String(id))
+          .filter((id) => /^\d{4,20}$/.test(id)),
+      )].slice(0, 200);
+      return;
+    }
+
     if (value === null || typeof value === 'object' || typeof value === 'function') return;
     if (typeof value === 'string' && value.length > 64) return;
 
@@ -121,6 +137,10 @@ function sanitizeConfigPatch(input) {
     if (typeof DEFAULTS[key] === 'number') {
       const numeric = Number(value);
       if (!Number.isFinite(numeric)) return;
+      if (key === 'rotationMinutes') {
+        patch[key] = Math.min(1440, Math.max(1, Math.round(numeric)));
+        return;
+      }
       patch[key] = numeric;
       return;
     }
@@ -218,6 +238,8 @@ export async function mount(host, options = {}) {
     webUrl: null,
     background: 'placeholder',
     model: 'placeholder',
+    source: { type: 'procedural', id: '', title: '' },
+    sceneMissing: [],
   };
 
   let userAssets = { background: null, model: null, cleanup() {} };
@@ -285,6 +307,7 @@ export async function mount(host, options = {}) {
       saveConfig(config);
       syncUI();
       refreshFallbackTexture();
+      armRotation();
     },
     reset() {
       Object.assign(config, resetConfig());
@@ -319,9 +342,31 @@ export async function mount(host, options = {}) {
     }
   }
 
+  /**
+   * Where the currently painted background came from. The panel shows this so
+   * a user with several imported wallpapers can tell which one is live.
+   */
+  function describeBackgroundSource(probed, custom) {
+    if (custom) {
+      return { type: 'user', id: '', title: custom.name || '本地素材' };
+    }
+    if (probed.active) {
+      return {
+        type: 'workshop',
+        id: String(probed.active.id || ''),
+        title: String(probed.active.title || probed.active.name || ''),
+      };
+    }
+    if (probed.videoUrl || probed.imageUrl || probed.sceneUrl || probed.webUrl) {
+      return { type: 'project', id: '', title: '' };
+    }
+    return { type: 'procedural', id: '', title: '' };
+  }
+
   /** Stored user art wins over CLI/disk assets for the same slot. */
   function mergedAssets(probed) {
     const custom = userAssets.background;
+    const source = describeBackgroundSource(probed, custom);
     if (!custom && probed.active) {
       // The library manifest is a single explicit choice: do not let the
       // built-in scene or a stale candidate silently outrank it.
@@ -333,6 +378,7 @@ export async function mount(host, options = {}) {
         webUrl: kind === 'web' ? probed.webUrl : null,
         sceneData: null,
         modelUrl: userAssets.model?.url || probed.modelUrl,
+        source,
       };
     }
     return {
@@ -342,6 +388,7 @@ export async function mount(host, options = {}) {
       webUrl: custom ? null : probed.webUrl,
       sceneData: custom ? null : probed.sceneData,
       modelUrl: userAssets.model?.url || probed.modelUrl,
+      source,
     };
   }
 
@@ -357,6 +404,36 @@ export async function mount(host, options = {}) {
           : '程序化';
   }
 
+  const SOURCE_LABELS = {
+    user: '本地文件',
+    workshop: '创意工坊',
+    project: '项目素材',
+    procedural: '程序化',
+  };
+
+  function currentBackgroundTitle() {
+    const source = assets.source || {};
+    if (source.type === 'user') return userAssets.background?.name || '本地素材';
+    if (source.type === 'workshop') {
+      return source.title || (source.id ? `工坊壁纸 ${source.id}` : '创意工坊壁纸');
+    }
+    if (source.type === 'project') return backgroundFallbackLabel();
+    return '程序化背景';
+  }
+
+  /** Thumbnail for the "current wallpaper" card. Video/scene have no cheap thumb. */
+  function currentPreviewUrl() {
+    if (!backgroundIsArtwork()) return '';
+    const source = assets.source || {};
+    if (source.type === 'workshop' && source.id && hasWorkshopApi()) {
+      return previewUrl(source.id);
+    }
+    if (assets.background === 'image') {
+      return userAssets.background?.url || assets.imageUrl || '';
+    }
+    return '';
+  }
+
   function updateStatus() {
     setStatus(`背景 ${backgroundLabel()} · 模型 ${assets.model === 'glb' ? 'GLB' : '占位'}`);
   }
@@ -367,6 +444,8 @@ export async function mount(host, options = {}) {
     assets.sceneUrl = probed.sceneUrl || null;
     assets.webUrl = probed.webUrl || null;
     assets.background = 'placeholder';
+    assets.source = probed.source || { type: 'procedural', id: '', title: '' };
+    assets.sceneMissing = [];
 
     if (probed.videoUrl) {
       try {
@@ -386,6 +465,7 @@ export async function mount(host, options = {}) {
         engine.setSceneWallpaper(scene);
         assets.background = 'scene';
         assets.scene = scene.meta;
+        assets.sceneMissing = Array.isArray(scene.missingTextures) ? scene.missingTextures : [];
       } catch (error) {
         console.warn('[codex-bg] scene wallpaper failed, trying next source', error);
         assets.sceneUrl = null;
@@ -415,6 +495,7 @@ export async function mount(host, options = {}) {
     }
 
     if (assets.background === 'placeholder') {
+      assets.source = { type: 'procedural', id: '', title: '' };
       await engine.setBackgroundImage(
         createFallbackBackground(2048, 1152, getTheme(config.theme).palette),
       );
@@ -611,6 +692,59 @@ export async function mount(host, options = {}) {
     panelRef?.refreshAssets();
   }
 
+  /* ---------------------------------------------------------------- */
+  /* Wallpaper rotation                                               */
+  /* ---------------------------------------------------------------- */
+
+  let rotationTimer = 0;
+  let rotationBusy = false;
+
+  function clearRotation() {
+    if (!rotationTimer) return;
+    clearTimeout(rotationTimer);
+    rotationTimer = 0;
+  }
+
+  function armRotation() {
+    clearRotation();
+    if (disposed || embed || !config.rotationEnabled || !hasWorkshopApi()) return;
+    const minutes = clamp(Number(config.rotationMinutes) || 30, 1, 1440);
+    rotationTimer = setTimeout(() => {
+      rotationTimer = 0;
+      rotateOnce().finally(() => armRotation());
+    }, minutes * 60_000);
+  }
+
+  async function rotateOnce() {
+    if (disposed || rotationBusy || !config.rotationEnabled || !hasWorkshopApi()) return;
+    rotationBusy = true;
+    try {
+      const payload = await listWorkshop();
+      const currentId = String(assets.source?.type === 'workshop' ? assets.source.id : '');
+      const next = nextRotationEntry(payload?.entries, config.favoriteIds, currentId);
+      if (!next) return;
+
+      await queueAsset(async () => {
+        await applyWorkshop(next.id);
+        const previous = userAssets;
+        userAssets = createUserAssetState(null, previous.model);
+        previous.cleanup(['background']);
+        const probed = await probeAssets();
+        await applyBackground(mergedAssets(probed));
+        syncWallpaperMode({ applyLook: true });
+        engine.setConfig(config);
+        updateStatus();
+        panelRef?.refreshAssets();
+        panelRef?.refreshWorkshop();
+        setStatus(`轮播 · ${next.title || next.id}`);
+      });
+    } catch (error) {
+      console.warn('[codex-bg] rotation failed', error);
+    } finally {
+      rotationBusy = false;
+    }
+  }
+
   // Background first so the first painted frame is not empty.
   try {
     await reloadUserAssets();
@@ -693,6 +827,7 @@ export async function mount(host, options = {}) {
         applyVisibility();
         refreshFallbackTexture();
         updateTierLabel();
+        armRotation();
       },
       onReset: () => {
         const wasOpen = Boolean(config.showPanel);
@@ -703,6 +838,7 @@ export async function mount(host, options = {}) {
         panelRef.sync();
         applyVisibility();
         refreshFallbackTexture();
+        armRotation();
       },
       onImport: (data) => {
         const patch = sanitizeConfigPatch(data);
@@ -721,6 +857,7 @@ export async function mount(host, options = {}) {
         panelRef.sync();
         applyVisibility();
         refreshFallbackTexture();
+        armRotation();
       },
       onAsset: async (slot, file) => {
         await queueAsset(() => installUserAsset(slot, file));
@@ -740,6 +877,7 @@ export async function mount(host, options = {}) {
           updateStatus();
         });
         panelRef?.refreshAssets();
+        armRotation();
       },
       getAssetSummary: () => ({
         kind: assets.background,
@@ -748,11 +886,30 @@ export async function mount(host, options = {}) {
           : backgroundFallbackLabel(),
         backgroundCustom: Boolean(userAssets.background),
         backgroundArtwork: backgroundIsArtwork(),
+        backgroundTitle: currentBackgroundTitle(),
+        backgroundSource: SOURCE_LABELS[assets.source?.type] || SOURCE_LABELS.procedural,
+        backgroundSourceId: assets.source?.id || '',
+        backgroundPreviewUrl: currentPreviewUrl(),
+        backgroundMissingTextures: Array.isArray(assets.sceneMissing)
+          ? assets.sceneMissing.map((entry) => `${entry.role} · ${entry.name}`)
+          : [],
         model: userAssets.model
           ? `${userAssets.model.name} · ${formatBytes(userAssets.model.size)}`
           : modelFallbackLabel(),
         modelCustom: Boolean(userAssets.model),
       }),
+      isFavorite: (id) => (config.favoriteIds || []).map(String).includes(String(id)),
+      onToggleFavorite: (id) => {
+        const key = String(id);
+        if (!/^\d{4,20}$/.test(key)) return;
+        const next = new Set((config.favoriteIds || []).map(String));
+        if (next.has(key)) next.delete(key);
+        else next.add(key);
+        config.favoriteIds = [...next].slice(0, 200);
+        saveConfig(config);
+        armRotation();
+        panelRef?.refreshWorkshop();
+      },
     },
     {
       compact: embed,
@@ -858,6 +1015,7 @@ export async function mount(host, options = {}) {
 
   applyVisibility();
   engine.start();
+  armRotation();
 
   setTimeout(() => loader.classList.add('done'), 650);
   setTimeout(() => loader.remove(), 1600);
@@ -910,6 +1068,7 @@ export async function mount(host, options = {}) {
   function dispose() {
     if (disposed) return;
     disposed = true;
+    clearRotation();
     window.removeEventListener('keydown', onKeyDown, true);
     try {
       userAssets.cleanup();

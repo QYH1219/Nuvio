@@ -29,15 +29,18 @@ Nuvio is the project's new name (formerly Codex Dynamic Background). Only the pu
 - **Adjustable rendering**: quality tier, motion, parallax, bloom, grain, dim, model scale/position/spin, and UI frost strength.
 - **Assets from the settings panel**: pick or drop images, videos, and single-file GLBs without touching a terminal. Files stay in local IndexedDB and survive reloads.
 - **Creative workshop**: scans Wallpaper Engine wallpapers already downloaded locally (`431960`), with preview cards, one-click import, apply, and delete. No network access and no automatic downloads.
+- **Current wallpaper identity**: the top of the panel shows the live wallpaper's thumbnail, title, and source (local file / workshop / project asset / procedural), so multiple imports never become ambiguous.
+- **Favorites and rotation**: star workshop cards (`☆` / `★`), filter with `★ 收藏`, and optionally rotate every N minutes. Rotation prefers favorites, otherwise uses imported wallpapers, starts disabled, and never replaces the current frame immediately.
 - **Local wallpaper library**: imported video/scene wallpapers live under `public/assets/library/<id>/`; `active.json` records the applied wallpaper and restores it after reloads.
 - **Four fill modes**: `auto` / `cover` / `contain` / `stretch` for images, videos, and scene wallpapers. `contain` shows the complete artwork (may letterbox); `stretch` fills the window without cropping.
-- **Lightweight quality tiers**: Saver / Balanced / High, with Saver as the default. Tiers only change sampling density and the FPS cap, never the framing. Sustained low FPS drops one tier, static wallpapers can stop rendering while idle, and rendering pauses when the window loses focus.
+- **Lightweight quality tiers**: Saver / Balanced / High, with Saver as the default. Tiers only change sampling density and the FPS cap, never the framing. Sustained low FPS drops one tier, static wallpapers can stop rendering while idle, and rendering pauses when the window loses focus. Software rasterizers and old integrated GPUs are automatically capped at 24 FPS without changing sampling or composition.
 - **Desktop wallpaper mode**: picking an image, video, or scene wallpaper switches to the crisp desktop look and removes the extra blur/vignette overlay. Once artwork owns the screen, theme presets are no longer layered on top.
 - **Settings in injected mode**: a compact panel is available from the bottom-right gear or `G`. Sections collapse and reset individually; JSON export/import lives in the `⋯` menu (config only, no wallpaper files).
 - **Translucent Codex shell**: main surface and side panels become translucent; wallpaper mode also removes Codex workspace pseudo-surface overlays and blur, while settings pages stay opaque.
 - **Persistent settings**: configuration is stored in `localStorage` and restored on the next injection.
 - **Runtime injection**: delivered over the Chrome DevTools Protocol without modifying the Codex installation. A resident injector keeps the layer alive across reloads.
-- **Diagnostics and restore**: `npm run doctor` checks the build, assets, CDP, and resident injector; `npm run restore` removes the layer and optionally clears settings.
+- **Diagnostics and restore**: the runtime panel shows FPS, GPU, frame cap, drawing buffer, texture memory, draw calls, missing scene textures, and skipped water stages. `npm run doctor` checks the build, assets, CDP, and resident injector; `npm run restore` removes the layer and optionally clears settings.
+- **Manual update check**: the System section shows the current version and contacts GitHub Releases only after you click `检查更新`.
 - **No assets required**: falls back to a procedural background and placeholder crystal.
 - **No backend, no telemetry**: assets are read locally and never uploaded.
 
@@ -130,11 +133,11 @@ The panel has five sections. Every section except Wallpaper collapses, and each 
 
 | Section | Contents |
 | --- | --- |
-| Wallpaper | local files / drag-and-drop, creative workshop results |
+| Wallpaper | current wallpaper card, local files / drag-and-drop, creative workshop results, favorites filter, rotation |
 | Look | fill mode (auto / cover / contain / stretch), UI frost, background dim, vignette |
 | Performance | quality tier, automatic downgrade, idle pause, pause when unfocused, motion, parallax |
 | Advanced | bloom, particles (procedural only), grain, scene shake/sway/water, GLB placement, runtime diagnostics |
-| System | restore on login (writes only Startup\Nuvio.lnk) |
+| System | restore on login (writes only Startup\Nuvio.lnk), current version, manual update check |
 
 Themes and readability presets are no longer exposed: once a wallpaper is active it owns the palette, and layering a theme on top only muddies the artwork. Existing `theme` / `readability` values still apply to the procedural fallback. Inputs, textareas, and `contenteditable` elements do not trigger the `G` shortcut. Advanced starts collapsed.
 
@@ -222,6 +225,9 @@ In injected mode, press `G` and use the workshop cards in the Wallpaper section:
 | Import | copies / converts the wallpaper into `public/assets/library/<id>/`; video and scene may show conversion progress |
 | Apply | writes `public/assets/active.json`, reloads the background, and switches to that wallpaper |
 | Delete | removes the library entry and clears the active state if it was applied |
+| Favorite | toggle `☆` / `★`; the `★ 收藏` filter shows only favorites, and rotation prefers them |
+
+Rotation is off by default. When enabled, it cycles imported video/scene wallpapers: favorites form the pool when present, otherwise every usable imported item is used. Fewer than two usable entries means no rotation. Web and `application` wallpapers are excluded so an iframe is not rebuilt every interval. Manual switches, config changes, and favorite changes reset the timer instead of immediately replacing the current wallpaper.
 
 The workshop API only exists while the resident injector from `npm start` / `npm run inject` is running, because scanning and conversion happen in the local Node process. `--once` and the plain preview server do not expose it. The API binds to `127.0.0.1` and validates a per-run token generated by the injector.
 
@@ -545,14 +551,19 @@ A failed model load does not break the page. It falls back to the placeholder cr
 - Keep the CDP and control ports bound to `127.0.0.1`; never expose them to a LAN.
 - 4K artwork plus large models can be GPU-heavy. In order: lower `quality`, enable `idlePause` / `pauseWhenUnfocused`, downscale the source to 2560/3840, and only then shrink the model. Bloom and particles are already off in wallpaper mode, so toggling them saves nothing.
 - WebGL context loss stops the loop and records the state; `webglcontextrestored` re-uploads textures and resumes without restarting Codex. If WebGL creation fails outright, a CSS gradient fallback stays visible instead of a black window.
+- The low-end GPU cap changes only the frame rate (24 FPS maximum), never DPR, fit, Bloom, or particles. Turn off `低端 GPU 自动限帧` when you prefer smoother motion.
+- Missing scene mask / normal / phase textures and skipped `waterripple` / `waterflow` stages appear as a readable reason in the runtime panel; full URLs stay in the console.
 - If the background looks washed out, inject with `--surface 0.15 --dim 0.05`, or choose the Clear readability preset in the panel. Lower panel opacity makes artwork clearer but reduces text contrast.
 - The preview site and injected Codex use separate IndexedDB stores. Import assets in each origin, or use `public/assets` / `npm run use` for a shared disk-based setup.
 - Linux/macOS launcher paths and process names may need adjustment.
 - macOS/Linux injection paths are experimental; the preview site works normally.
+- GLB models accept KTX2 textures, but scene wallpaper PNGs are not automatically transcoded to KTX2.
+- Nuvio paints one layer inside the Codex window. It does not replace the Windows desktop wallpaper and cannot assign different wallpapers to separate monitors.
 
 ## Privacy
 
-- No telemetry and no uploads.
+- No telemetry and no uploads. Startup and normal rendering make no network request beyond the local asset server.
+- Only clicking `检查更新` contacts the GitHub Releases API; the local injector proxies it when available and caches the result for 10 minutes.
 - Assets are read from local directories only.
 - The injected script is delivered over CDP and does not write into the Codex installation.
 - The restore-control server listens only on `127.0.0.1` and uses a random per-injection token. `.cxd-inject.json` is gitignored.

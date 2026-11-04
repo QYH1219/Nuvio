@@ -61,8 +61,12 @@ export const DEFAULTS = {
   wallpaperMode: false,
   quality: 'saver',
   autoQuality: true,
+  lowEndAuto: true,
   idlePause: true,
   pauseWhenUnfocused: true,
+  rotationEnabled: false,
+  rotationMinutes: 30,
+  favoriteIds: [],
   motion: 1,
   parallax: 1,
   bloom: 0.85,
@@ -86,14 +90,21 @@ export const DEFAULTS = {
 export function loadConfig() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { ...DEFAULTS };
+    if (!raw) return { ...DEFAULTS, favoriteIds: [] };
     const parsed = JSON.parse(raw);
     const merged = { ...DEFAULTS, ...(parsed && typeof parsed === 'object' ? parsed : {}) };
     merged.quality = normalizeQuality(merged.quality);
     if (!FIT_IDS.includes(merged.fit)) merged.fit = DEFAULTS.fit;
+    const rotation = Number(merged.rotationMinutes);
+    merged.rotationMinutes = Number.isFinite(rotation)
+      ? Math.min(1440, Math.max(1, Math.round(rotation)))
+      : DEFAULTS.rotationMinutes;
+    merged.favoriteIds = Array.isArray(merged.favoriteIds)
+      ? [...new Set(merged.favoriteIds.filter((id) => /^\d{4,20}$/.test(String(id))).map(String))].slice(0, 200)
+      : [];
     return merged;
   } catch {
-    return { ...DEFAULTS };
+    return { ...DEFAULTS, favoriteIds: [] };
   }
 }
 
@@ -111,7 +122,7 @@ export function resetConfig() {
   } catch {
     /* ignore */
   }
-  return { ...DEFAULTS };
+  return { ...DEFAULTS, favoriteIds: [] };
 }
 
 export function clamp(value, min, max) {

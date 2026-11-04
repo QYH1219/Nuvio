@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { BackgroundLayer } from './scene/background.js';
 import { QUALITY, clamp, normalizeQuality } from './config.js';
+import { describeGpu, detectLowEndGpu, readGpuString, resolveFpsCap } from './gpu.js';
 import { getTheme } from './presets.js';
 import {
   ARTWORK_TEXTURE_EDGE,
@@ -68,6 +69,18 @@ export class BackgroundEngine {
     this.renderer.setClearColor(0x030509, 1);
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.06;
+
+    // The adapter name decides whether the tier frame cap is lowered to 24.
+    // Sampling, fit and composition stay untouched, so a low-end machine sees
+    // the same wallpaper, just at a calmer frame rate.
+    const gpuRaw = readGpuString(this.renderer);
+    this.gpu = describeGpu(gpuRaw);
+    this.gpuLowEnd = detectLowEndGpu(gpuRaw);
+    this.fpsCap = resolveFpsCap({
+      tierFps: this.quality.fps,
+      lowEnd: this.gpuLowEnd,
+      lowEndAuto: this.config.lowEndAuto !== false,
+    });
 
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(36, 16 / 9, 0.1, 120);
@@ -499,8 +512,9 @@ export class BackgroundEngine {
 
   setConfig(config) {
     const qualityChanged = normalizeQuality(config.quality) !== normalizeQuality(this.config.quality);
+    const lowEndChanged = (config.lowEndAuto !== false) !== (this.config.lowEndAuto !== false);
     this.config = { ...config };
-    if (qualityChanged) this.applyQuality();
+    if (qualityChanged || lowEndChanged) this.applyQuality();
     this.syncEffects();
     if (this.glow) {
       this.glow.material.uniforms.uStrength.value = 0.55 + config.bloom * 0.55;
@@ -531,6 +545,11 @@ export class BackgroundEngine {
   applyQuality() {
     const tier = QUALITY[normalizeQuality(this.config.quality)];
     this.quality = tier;
+    this.fpsCap = resolveFpsCap({
+      tierFps: tier.fps,
+      lowEnd: this.gpuLowEnd,
+      lowEndAuto: this.config.lowEndAuto !== false,
+    });
     // Sampling is the only thing a quality tier changes. Do not clamp this to
     // window.devicePixelRatio: on a 1x display every tier would collapse to the
     // same buffer size, so "balanced"/"high" would only change the frame cap
@@ -603,7 +622,7 @@ export class BackgroundEngine {
 
   _schedule() {
     if (!this._running || this._raf || this._timer || this.disposed) return;
-    const interval = 1000 / (this.quality.fps || 60);
+    const interval = 1000 / (this.fpsCap || this.quality.fps || 60);
     if (interval > 20) {
       const since = this._lastRender ? performance.now() - this._lastRender : interval;
       const wait = Math.max(4, interval - since);
@@ -638,7 +657,7 @@ export class BackgroundEngine {
     if (this.contextLost) return;
 
     const now = performance.now();
-    const interval = 1000 / (this.quality.fps || 60);
+    const interval = 1000 / (this.fpsCap || this.quality.fps || 60);
     if (this._lastRender && now - this._lastRender < interval - 1.5) {
       this._schedule();
       return;
@@ -727,9 +746,17 @@ export class BackgroundEngine {
           : [];
     const textureStats = summarizeTextures(textures);
     const memory = this.renderer?.info?.memory;
+    const sceneMaterial = this.background?.sceneMaterial || null;
+    const missingTextures = sceneMaterial?.missingTextures || [];
+    const skippedEffects = sceneMaterial?.skippedEffects || [];
     return {
       fps: this.fps,
       tier: normalizeQuality(this.config.quality),
+      fpsCap: this.fpsCap || this.quality.fps || 60,
+      gpu: this.gpu,
+      gpuLowEnd: this.gpuLowEnd,
+      sceneMissingTextures: missingTextures.map((entry) => `${entry.role} · ${entry.name}`),
+      sceneTextureWarnings: skippedEffects.map((entry) => `${entry.type} · ${entry.reason}`),
       dpr: this.pixelRatio || 1,
       bufferWidth: buffer?.x || 0,
       bufferHeight: buffer?.y || 0,

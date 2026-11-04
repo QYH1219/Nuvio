@@ -702,6 +702,76 @@ body.cxd-embedded {
   color: rgba(233, 243, 246, 0.4);
 }
 
+/* Current-wallpaper identity card: thumbnail + title + source badge. */
+.cxd-asset-current {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 8px;
+  padding: 7px;
+  border: 1px solid rgba(95, 227, 214, 0.16);
+  border-radius: 9px;
+  background: rgba(95, 227, 214, 0.045);
+}
+
+.cxd-current-thumb {
+  position: relative;
+  flex: 0 0 54px;
+  width: 54px;
+  height: 54px;
+  overflow: hidden;
+  border-radius: 7px;
+  background:
+    linear-gradient(135deg, rgba(95, 227, 214, 0.18), rgba(255, 255, 255, 0.03)),
+    rgba(0, 0, 0, 0.3);
+}
+
+.cxd-current-thumb img {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.cxd-current-fallback {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  color: rgba(206, 255, 247, 0.32);
+}
+
+.cxd-current-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.cxd-current-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 500;
+  color: rgba(233, 243, 246, 0.86);
+}
+
+.cxd-current-source {
+  align-self: flex-start;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(95, 227, 214, 0.14);
+  color: rgba(190, 255, 246, 0.78);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
 .cxd-asset-row {
   display: flex;
   align-items: center;
@@ -1241,12 +1311,29 @@ body.cxd-embedded {
   color: rgba(233, 243, 246, 0.38);
 }
 
+.cxd-update-status a.cxd-update-link {
+  color: rgba(159, 250, 236, 0.85);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.cxd-update .cxd-asset-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .cxd-diag-value {
   font-family: 'Cascadia Code', ui-monospace, monospace;
   font-size: 10.5px;
   color: rgba(159, 250, 236, 0.7);
   text-align: right;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cxd-diag-value.is-warn {
+  color: rgba(255, 196, 138, 0.82);
 }
 
 .cxd-workshop {
@@ -1376,7 +1463,7 @@ body.cxd-embedded {
   border-radius: 4px;
   background: rgba(3, 9, 13, 0.72);
   color: rgba(206, 255, 247, 0.75);
-  font-size: 8.5px;
+  font-size: 11px;
   line-height: 1;
   backdrop-filter: blur(4px);
 }
@@ -1403,7 +1490,7 @@ body.cxd-embedded {
   gap: 4px;
   min-width: 0;
   overflow: hidden;
-  font-size: 9.5px;
+  font-size: 11px;
   color: rgba(233, 243, 246, 0.34);
   white-space: nowrap;
 }
@@ -1413,7 +1500,7 @@ body.cxd-embedded {
   border-radius: 3px;
   background: rgba(255, 255, 255, 0.08);
   color: rgba(233, 243, 246, 0.55);
-  font-size: 8.5px;
+  font-size: 11px;
   font-weight: 600;
 }
 
@@ -1425,11 +1512,46 @@ body.cxd-embedded {
 .cxd-ws-use {
   flex: 0 0 auto;
   padding: 5px 7px;
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .cxd-ws-use:disabled {
   opacity: 0.38;
+}
+
+.cxd-ws-fav {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.025);
+  color: rgba(233, 243, 246, 0.4);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.cxd-ws-fav:hover {
+  color: rgba(255, 222, 150, 0.95);
+  border-color: rgba(255, 206, 120, 0.35);
+  background: rgba(255, 206, 120, 0.08);
+}
+
+.cxd-rotation-note {
+  margin-top: 7px;
+}
+
+.cxd-ws-fav.on {
+  color: rgba(255, 214, 130, 0.95);
+  border-color: rgba(255, 206, 120, 0.32);
+  background: rgba(255, 206, 120, 0.1);
+}
+
+.cxd-ws-fav:disabled {
+  opacity: 0.3;
+  cursor: default;
 }
 
 .cxd-ws-empty {

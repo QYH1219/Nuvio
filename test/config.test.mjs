@@ -51,3 +51,39 @@ test('clamp keeps values inside the requested range', () => {
   assert.equal(clamp(2, 0, 1), 1);
   assert.equal(clamp(0.4, 0, 1), 0.4);
 });
+
+test('favoriteIds never leaks the shared default array', () => {
+  localStorage.removeItem('codex-dynamic-bg:v2');
+  const first = loadConfig();
+  first.favoriteIds.push('12345');
+  assert.deepEqual(loadConfig().favoriteIds, []);
+  assert.notEqual(loadConfig().favoriteIds, DEFAULTS.favoriteIds);
+
+  const reset = resetConfig();
+  reset.favoriteIds.push('99999');
+  assert.deepEqual(resetConfig().favoriteIds, []);
+});
+
+test('favoriteIds are validated, deduplicated and capped', () => {
+  saveConfig({
+    favoriteIds: ['12345', '12345', 'abc', '', 67890, '12345678901234567890123'],
+  });
+  assert.deepEqual(loadConfig().favoriteIds, ['12345', '67890']);
+
+  saveConfig({ favoriteIds: Array.from({ length: 260 }, (_, i) => String(10000 + i)) });
+  assert.equal(loadConfig().favoriteIds.length, 200);
+
+  saveConfig({ favoriteIds: 'nope' });
+  assert.deepEqual(loadConfig().favoriteIds, []);
+});
+
+test('rotationMinutes is clamped to a usable window', () => {
+  saveConfig({ rotationMinutes: 0 });
+  assert.equal(loadConfig().rotationMinutes, 1);
+  saveConfig({ rotationMinutes: 99999 });
+  assert.equal(loadConfig().rotationMinutes, 1440);
+  saveConfig({ rotationMinutes: 12.6 });
+  assert.equal(loadConfig().rotationMinutes, 13);
+  saveConfig({ rotationMinutes: 'soon' });
+  assert.equal(loadConfig().rotationMinutes, DEFAULTS.rotationMinutes);
+});

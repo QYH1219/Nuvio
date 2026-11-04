@@ -1,6 +1,7 @@
 import { DEFAULTS, QUALITY, QUALITY_ORDER } from './config.js';
 import { getAutostart, hasWorkshopApi, setAutostart } from './workshop.js';
 import { createWorkshopSection } from './panel/workshop.js';
+import { checkForUpdates } from './update.js';
 
 const NUVIO_VERSION = typeof __NUVIO_VERSION__ === 'undefined' ? 'dev' : __NUVIO_VERSION__;
 
@@ -20,7 +21,27 @@ const SECTIONS = [
   {
     id: 'assets',
     title: '壁纸',
-    controls: [{ type: 'assets' }, { type: 'workshop' }],
+    controls: [
+      { type: 'assets' },
+      { type: 'workshop' },
+      // Rotation needs the local workshop API, so these controls stay hidden
+      // on the static preview site instead of pretending to work.
+      { type: 'toggle', key: 'rotationEnabled', label: '壁纸轮播', when: 'workshop' },
+      {
+        type: 'range',
+        key: 'rotationMinutes',
+        label: '轮播间隔（分钟）',
+        min: 1,
+        max: 240,
+        step: 1,
+        when: 'workshop',
+      },
+      {
+        type: 'note',
+        when: 'workshop',
+        text: '轮播优先使用带 ★ 的收藏；没有收藏时，在已导入的视频 / 场景壁纸之间轮换。',
+      },
+    ],
   },
   {
     id: 'look',
@@ -54,6 +75,7 @@ const SECTIONS = [
         options: QUALITY_ORDER.map((id) => [id, QUALITY[id].label]),
       },
       { type: 'toggle', key: 'autoQuality', label: '卡顿时自动降档' },
+      { type: 'toggle', key: 'lowEndAuto', label: '低端 GPU 自动限帧' },
       { type: 'toggle', key: 'idlePause', label: '静态壁纸停帧' },
       { type: 'toggle', key: 'pauseWhenUnfocused', label: '窗口失焦时暂停' },
       { type: 'range', key: 'motion', label: '动态强度', min: 0, max: 2, step: 0.01 },
@@ -77,7 +99,7 @@ const SECTIONS = [
   {
     id: 'system',
     title: '系统',
-    controls: [{ type: 'autostart' }],
+    controls: [{ type: 'autostart' }, { type: 'update' }],
   },
 ];
 
@@ -151,6 +173,8 @@ export function createPanel(config, handlers = {}, options = {}) {
   const onClearAsset = handlers.onClearAsset || null;
   const onWorkshopApplied = handlers.onWorkshopApplied || (async () => {});
   const getAssetSummary = handlers.getAssetSummary || (() => ({}));
+  const isFavorite = handlers.isFavorite || (() => false);
+  const onToggleFavorite = handlers.onToggleFavorite || null;
   const compact = Boolean(options.compact);
 
   const panel = document.createElement('div');
@@ -259,6 +283,8 @@ export function createPanel(config, handlers = {}, options = {}) {
             refreshAssets();
           },
           onMessage: (text) => flash(text),
+          isFavorite,
+          onToggleFavorite,
         });
         sectionBody.appendChild(workshop.el);
         return;
@@ -291,6 +317,20 @@ export function createPanel(config, handlers = {}, options = {}) {
 
       if (control.type === 'autostart') {
         sectionBody.appendChild(buildAutostart());
+        return;
+      }
+
+      if (control.type === 'update') {
+        sectionBody.appendChild(buildUpdate());
+        return;
+      }
+
+      if (control.type === 'note') {
+        const note = document.createElement('p');
+        note.className = 'cxd-asset-hint cxd-rotation-note';
+        note.textContent = control.text;
+        sectionBody.appendChild(note);
+        gate(control, note);
         return;
       }
 
@@ -461,6 +501,64 @@ export function createPanel(config, handlers = {}, options = {}) {
     return group;
   }
 
+  function buildUpdate() {
+    const group = document.createElement('div');
+    group.className = 'cxd-group cxd-update';
+
+    const title = document.createElement('div');
+    title.className = 'cxd-group-title';
+    title.textContent = '版本';
+
+    const row = document.createElement('div');
+    row.className = 'cxd-row';
+    const label = document.createElement('span');
+    label.className = 'cxd-row-label';
+    label.textContent = `当前 v${NUVIO_VERSION}`;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'cxd-asset-btn';
+    btn.textContent = '检查更新';
+    row.append(label, btn);
+
+    const status = document.createElement('p');
+    status.className = 'cxd-asset-hint cxd-update-status';
+    status.setAttribute('role', 'status');
+    status.setAttribute('aria-live', 'polite');
+    status.textContent = '默认不联网；只有点这里才会访问 GitHub Releases。';
+
+    let busy = false;
+    btn.addEventListener('click', async () => {
+      if (busy) return;
+      busy = true;
+      btn.disabled = true;
+      status.textContent = '正在检查 GitHub Releases…';
+      try {
+        const result = await checkForUpdates(NUVIO_VERSION);
+        status.textContent = '';
+        if (result.updateAvailable) {
+          status.append(`发现新版本 v${result.latest} · `);
+          const link = document.createElement('a');
+          link.href = result.url;
+          link.target = '_blank';
+          link.rel = 'noreferrer noopener';
+          link.className = 'cxd-update-link';
+          link.textContent = '查看 Release';
+          status.append(link);
+        } else {
+          status.textContent = `已是最新（v${result.current}）`;
+        }
+      } catch (error) {
+        status.textContent = `检查失败：${error?.message || '网络不可用'}`;
+      } finally {
+        busy = false;
+        btn.disabled = false;
+      }
+    });
+
+    group.append(title, row, status);
+    return group;
+  }
+
   /**
    * Read-only runtime panel. Everything here comes from engine.stats(), so it
    * answers the questions users actually ask: is the wallpaper being rendered
@@ -485,6 +583,9 @@ export function createPanel(config, handlers = {}, options = {}) {
       ['textures', '贴图 / 显存'],
       ['draw', '绘制调用'],
       ['scene', '背景类型'],
+      ['gpu', 'GPU'],
+      ['cap', '帧率上限'],
+      ['warn', '缺失贴图'],
     ].forEach(([key, label]) => {
       const name = document.createElement('span');
       name.className = 'cxd-diag-key';
@@ -508,6 +609,38 @@ export function createPanel(config, handlers = {}, options = {}) {
     hint.className = 'cxd-asset-hint';
     hint.textContent =
       '直接换图、换视频、换 Tripo 模型；模型请用单文件 .glb，素材只保存在本机，不上传。';
+
+    // Identity card: which wallpaper is live right now, and where it came
+    // from. With several imported workshop entries this was previously
+    // impossible to tell from the panel.
+    const current = document.createElement('div');
+    current.className = 'cxd-asset-current';
+
+    const currentThumb = document.createElement('div');
+    currentThumb.className = 'cxd-current-thumb';
+    const currentImg = document.createElement('img');
+    currentImg.alt = '';
+    currentImg.loading = 'lazy';
+    currentImg.decoding = 'async';
+    currentImg.hidden = true;
+    currentImg.addEventListener('error', () => {
+      currentImg.hidden = true;
+    });
+    const currentFallback = document.createElement('span');
+    currentFallback.className = 'cxd-current-fallback';
+    currentFallback.textContent = 'NUVIO';
+    currentThumb.append(currentFallback, currentImg);
+
+    const currentMeta = document.createElement('div');
+    currentMeta.className = 'cxd-current-meta';
+    const currentTitle = document.createElement('b');
+    currentTitle.className = 'cxd-current-title';
+    currentTitle.textContent = '程序化背景';
+    const currentSource = document.createElement('span');
+    currentSource.className = 'cxd-current-source';
+    currentSource.textContent = '程序化';
+    currentMeta.append(currentTitle, currentSource);
+    current.append(currentThumb, currentMeta);
 
     const wallpaperNote = document.createElement('div');
     wallpaperNote.className = 'cxd-wallpaper-note';
@@ -574,11 +707,27 @@ export function createPanel(config, handlers = {}, options = {}) {
       handleAsset(slot, file);
     });
 
-    wrapAssets.append(hint, wallpaperNote, ...rows.map((entry) => entry.row), drop);
+    wrapAssets.append(hint, current, wallpaperNote, ...rows.map((entry) => entry.row), drop);
     refs.assets = { type: 'assets', rows };
 
     refreshAssets = () => {
       const summary = getAssetSummary() || {};
+      const title = summary.backgroundTitle || '程序化背景';
+      currentTitle.textContent = title;
+      currentTitle.title = title;
+      currentSource.textContent = summary.backgroundSource || '程序化';
+      const preview = summary.backgroundPreviewUrl || '';
+      if (preview) {
+        if (currentImg.dataset.src !== preview) {
+          currentImg.dataset.src = preview;
+          currentImg.hidden = false;
+          currentImg.src = preview;
+        }
+      } else {
+        currentImg.hidden = true;
+        delete currentImg.dataset.src;
+        currentImg.removeAttribute('src');
+      }
       if (wallpaperNote) wallpaperNote.hidden = !summary.backgroundArtwork;
       rows.forEach(({ row, clear }) => {
         const slot = row.dataset.assetRow;
@@ -603,6 +752,7 @@ export function createPanel(config, handlers = {}, options = {}) {
       artwork: Boolean(summary.backgroundArtwork),
       procedural: !summary.backgroundArtwork,
       model: summary.model === 'glb',
+      workshop: hasWorkshopApi(),
     };
     gates.forEach(({ when, el }) => {
       el.hidden = state[when] === false;
@@ -773,6 +923,22 @@ export function createPanel(config, handlers = {}, options = {}) {
     ref.rows.buffer.textContent = `${stats.bufferWidth || 0}×${stats.bufferHeight || 0}`;
     ref.rows.textures.textContent = `${stats.textureCount || 0} 张 · ${formatBytes(stats.textureBytes)}`;
     ref.rows.draw.textContent = `${stats.drawCalls || 0} calls · ${stats.triangles || 0} tris`;
+    if (ref.rows.gpu) {
+      ref.rows.gpu.textContent = stats.gpu || 'unknown';
+      ref.rows.gpu.title = stats.gpu || '';
+    }
+    if (ref.rows.cap) {
+      ref.rows.cap.textContent =
+        `${stats.fpsCap || stats.fps || 0} FPS${stats.gpuLowEnd ? ' · 低端 GPU' : ''}`;
+    }
+    if (ref.rows.warn) {
+      const missing = Array.isArray(stats.sceneMissingTextures) ? stats.sceneMissingTextures : [];
+      const skipped = Array.isArray(stats.sceneTextureWarnings) ? stats.sceneTextureWarnings : [];
+      const parts = [...missing, ...skipped];
+      ref.rows.warn.textContent = parts.length ? parts.slice(0, 3).join('，') : '—';
+      ref.rows.warn.title = parts.join('\n');
+      ref.rows.warn.classList.toggle('is-warn', parts.length > 0);
+    }
     const kind = stats.mode === 'procedural'
       ? '程序化'
       : stats.artwork === 'scene'
@@ -815,6 +981,7 @@ export function createPanel(config, handlers = {}, options = {}) {
   }
 
   sync();
+  applyGates(getAssetSummary() || {});
 
   return {
     panel,

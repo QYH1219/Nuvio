@@ -2,6 +2,46 @@
 
 All notable changes to this project are documented here.
 
+## [0.6.0] - 2026-11-04
+
+### Added
+
+- Current-wallpaper identity card at the top of the Wallpaper section: 54 px
+  thumbnail, title, and source badge (`本地文件` / `创意工坊` / `项目素材` /
+  `程序化`). Workshop cards use the real preview image; failed thumbnails fall
+  back to the gradient tile.
+- Workshop favorites: `☆` / `★` on every card, a `★ 收藏` filter, and a
+  persisted `favoriteIds` list (validated, deduplicated, capped at 200).
+- Wallpaper rotation (`rotationEnabled`, `rotationMinutes`). The pool prefers
+  favorites and otherwise cycles through imported video/scene wallpapers.
+  Rotation starts disabled, never replaces the current wallpaper immediately,
+  and resets its timer after a manual switch or config change. Fewer than two
+  usable entries means no rotation.
+- Low-end GPU auto cap: software rasterizers and older integrated GPUs are
+  detected and capped at 24 FPS without touching DPR, framing, Bloom, or
+  particles. Can be disabled with `低端 GPU 自动限帧`.
+- Scene texture diagnostics: missing mask/normal/phase textures and skipped
+  `waterripple` / `waterflow` stages are reported in the panel instead of
+  silently producing a flat scene.
+- Manual update check in the System section. Nuvio still makes no network
+  request on startup; only clicking `检查更新` calls the GitHub Releases API
+  (through the local injector when available, with a 10-minute cache). The
+  result distinguishes up-to-date, update available, and an explicit error.
+
+### Changed
+
+- New panel text uses the 11 px minimum instead of 8.5–10 px badges.
+- README documents the current-wallpaper card, favorites/rotation, low-end GPU
+  cap, texture diagnostics, manual update check, and the remaining limits.
+
+### Known limitations
+
+- GLB models accept KTX2 textures, but scene wallpaper PNGs are not
+  automatically transcoded to KTX2.
+- Nuvio paints a single background layer inside the Codex window. It does not
+  replace the Windows desktop wallpaper and cannot assign different wallpapers
+  to separate monitors.
+
 ## [0.5.2] - 2026-11-04
 
 ### Fixed

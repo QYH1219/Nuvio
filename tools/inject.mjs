@@ -34,6 +34,47 @@ const STATE_FILE = join(ROOT, '.cxd-inject.json');
 const LOCK_FILE = join(ROOT, '.nuvio', 'injector.lock');
 const LOG_FILE = join(ROOT, '.nuvio', 'injector.log');
 
+/**
+ * Update check helper for the panel.
+ *
+ * The renderer cannot always reach api.github.com (Codex ships a strict CSP),
+ * so the local service performs the request on demand. There is no timer and
+ * no startup call: the endpoint only runs when the user clicks the button.
+ */
+const RELEASE_API = 'https://api.github.com/repos/QYH1219/Nuvio/releases/latest';
+const RELEASE_CACHE_MS = 10 * 60 * 1000;
+let releaseCache = { at: 0, data: null };
+
+async function fetchLatestRelease() {
+  if (releaseCache.data && Date.now() - releaseCache.at < RELEASE_CACHE_MS) {
+    return releaseCache.data;
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 9000);
+  try {
+    const res = await fetch(RELEASE_API, {
+      signal: controller.signal,
+      headers: {
+        accept: 'application/vnd.github+json',
+        'user-agent': 'Nuvio-Update-Check',
+      },
+    });
+    if (!res.ok) throw new Error(`GitHub 返回 ${res.status}`);
+    const data = await res.json();
+    const release = {
+      tag_name: String(data?.tag_name || ''),
+      name: String(data?.name || ''),
+      html_url: String(data?.html_url || ''),
+      published_at: String(data?.published_at || ''),
+    };
+    if (!release.tag_name) throw new Error('发布信息里没有版本号');
+    releaseCache = { at: Date.now(), data: release };
+    return release;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 const MIME = {
   '.avif': 'image/avif',
   '.bin': 'application/octet-stream',
@@ -509,6 +550,7 @@ function startControlServer(options, token, hooks) {
       url.pathname === '/config' ||
       url.pathname === '/reload' ||
       url.pathname === '/api/autostart' ||
+      url.pathname === '/api/update/check' ||
       url.pathname.startsWith('/api/workshop/') ||
       url.pathname.startsWith('/api/library/');
     if (!isApi) {
@@ -531,6 +573,14 @@ function startControlServer(options, token, hooks) {
       }
       if (request.method === 'GET' && url.pathname === '/api/autostart') {
         send(200, { ok: true, autostart: getAutostartStatus() });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/api/update/check') {
+        try {
+          send(200, { ok: true, release: await fetchLatestRelease() });
+        } catch (error) {
+          send(502, { ok: false, error: error?.message || 'update check failed' });
+        }
         return;
       }
       if (request.method === 'GET' && url.pathname === '/api/workshop/progress') {

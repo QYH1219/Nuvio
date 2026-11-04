@@ -46,6 +46,11 @@ async function request(path, options = {}) {
   return payload;
 }
 
+/** Shared transport for other local-service endpoints (e.g. update checks). */
+export function controlRequest(path, options = {}) {
+  return request(path, options);
+}
+
 export function listWorkshop() {
   return request('/api/workshop/list');
 }
