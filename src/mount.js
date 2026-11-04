@@ -27,7 +27,6 @@ import {
 } from './library.js';
 import { BackgroundEngine } from './scene.js';
 import { PerfGovernor } from './perf.js';
-import { validateModelUrl } from './scene/model.js';
 import {
   THEMES,
   READABILITY,
@@ -210,6 +209,7 @@ export async function mount(host, options = {}) {
     imageUrl: null,
     modelUrl: null,
     sceneUrl: null,
+    webUrl: null,
     background: 'placeholder',
     model: 'placeholder',
   };
@@ -218,7 +218,8 @@ export async function mount(host, options = {}) {
   let assetQueue = Promise.resolve();
 
   function backgroundIsArtwork() {
-    return assets.background === 'video' || assets.background === 'scene' || assets.background === 'image';
+    return assets.background === 'video' || assets.background === 'scene' ||
+      assets.background === 'image' || assets.background === 'web';
   }
 
   /**
@@ -323,6 +324,7 @@ export async function mount(host, options = {}) {
         videoUrl: kind === 'video' ? probed.videoUrl : null,
         imageUrl: kind === 'image' ? probed.imageUrl : null,
         sceneUrl: kind === 'scene' ? probed.sceneUrl : null,
+        webUrl: kind === 'web' ? probed.webUrl : null,
         sceneData: null,
         modelUrl: userAssets.model?.url || probed.modelUrl,
       };
@@ -331,6 +333,7 @@ export async function mount(host, options = {}) {
       videoUrl: custom ? (custom.kind === 'video' ? custom.url : null) : probed.videoUrl,
       imageUrl: custom ? (custom.kind === 'image' ? custom.url : null) : probed.imageUrl,
       sceneUrl: custom ? null : probed.sceneUrl,
+      webUrl: custom ? null : probed.webUrl,
       sceneData: custom ? null : probed.sceneData,
       modelUrl: userAssets.model?.url || probed.modelUrl,
     };
@@ -341,6 +344,8 @@ export async function mount(host, options = {}) {
       ? '视频'
       : assets.background === 'scene'
         ? '场景壁纸'
+        : assets.background === 'web'
+          ? '网页壁纸'
         : assets.background === 'image'
           ? '自定义图'
           : '程序化';
@@ -354,6 +359,7 @@ export async function mount(host, options = {}) {
     assets.videoUrl = probed.videoUrl || null;
     assets.imageUrl = probed.imageUrl || null;
     assets.sceneUrl = probed.sceneUrl || null;
+    assets.webUrl = probed.webUrl || null;
     assets.background = 'placeholder';
 
     if (probed.videoUrl) {
@@ -380,7 +386,18 @@ export async function mount(host, options = {}) {
       }
     }
 
-    if (assets.background !== 'video' && assets.background !== 'scene' && probed.imageUrl) {
+    if (assets.background !== 'video' && assets.background !== 'scene' && probed.webUrl) {
+      try {
+        engine.setBackgroundWeb(probed.webUrl);
+        assets.background = 'web';
+      } catch (error) {
+        console.warn('[codex-bg] web wallpaper failed, trying next source', error);
+        assets.webUrl = null;
+      }
+    }
+
+    if (assets.background !== 'video' && assets.background !== 'scene' &&
+        assets.background !== 'web' && probed.imageUrl) {
       try {
         const img = await loadImage(probed.imageUrl);
         await engine.setBackgroundImage(img);
@@ -449,6 +466,10 @@ export async function mount(host, options = {}) {
     const tempUrl = URL.createObjectURL(file);
     try {
       if (slot === 'model') {
+        // Keep GLTFLoader/DRACO/KTX2 out of the startup path. `model.js` is
+        // already imported lazily by the engine; a static import here would
+        // pull the whole loader stack into the main bundle again.
+        const { validateModelUrl } = await import('./scene/model.js');
         await validateModelUrl(tempUrl, engine.renderer);
       } else if (meta.kind === 'video') {
         disposeMediaElement(await loadVideo(tempUrl));
@@ -738,6 +759,7 @@ export async function mount(host, options = {}) {
     const labels = {
       video: '项目背景 / 视频',
       scene: '项目背景 / 场景壁纸',
+      web: '项目背景 / 网页壁纸',
       image: '项目背景 / 图片',
     };
     return labels[assets.background] || '程序化背景';

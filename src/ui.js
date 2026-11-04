@@ -1,14 +1,16 @@
 import { QUALITY, QUALITY_ORDER } from './config.js';
+import { getAutostart, hasWorkshopApi, setAutostart } from './workshop.js';
 import { createWorkshopSection } from './panel/workshop.js';
 
 const NUVIO_VERSION = typeof __NUVIO_VERSION__ === 'undefined' ? 'dev' : __NUVIO_VERSION__;
 
 /**
- * Four sections, ordered by how often a user touches them:
+ * Five sections, ordered by how often a user touches them:
  *   壁纸   — pick artwork (local file, Steam workshop, built-in)
  *   外观   — how the artwork fills the window, how readable the UI stays
  *   性能   — quality tier + the two switches that keep Codex smooth
  *   高级   — effect amounts and model placement
+ *   系统   — login autostart (writes only Startup\Nuvio.lnk)
  *
  * Theme presets and the readability presets are gone from the panel: once a
  * wallpaper is chosen it owns the palette, so picking a theme on top of it only
@@ -64,8 +66,14 @@ const SECTIONS = [
       { type: 'range', key: 'grain', label: '颗粒质感', min: 0, max: 1.5, step: 0.01 },
       { type: 'range', key: 'sceneShake', label: '场景抖动', min: 0, max: 2, step: 0.01, when: 'scene' },
       { type: 'range', key: 'sceneSway', label: '场景摇摆', min: 0, max: 2, step: 0.01, when: 'scene' },
+      { type: 'range', key: 'sceneWater', label: '水面动效', min: 0, max: 2, step: 0.01, when: 'scene' },
       { type: 'model' },
     ],
+  },
+  {
+    id: 'system',
+    title: '系统',
+    controls: [{ type: 'autostart' }],
   },
 ];
 
@@ -228,6 +236,11 @@ export function createPanel(config, handlers = {}, options = {}) {
         return;
       }
 
+      if (control.type === 'autostart') {
+        wrap.appendChild(buildAutostart());
+        return;
+      }
+
       if (control.type === 'segment') {
         const row = document.createElement('div');
         row.className = 'cxd-row';
@@ -310,6 +323,72 @@ export function createPanel(config, handlers = {}, options = {}) {
     row.append(label, input);
     refs[control.key] = { type: 'range', el: input, value, step: control.step };
     return row;
+  }
+
+  function buildAutostart() {
+    const group = document.createElement('div');
+    group.className = 'cxd-group';
+
+    const row = document.createElement('label');
+    row.className = 'cxd-row cxd-row-toggle';
+    const text = document.createElement('span');
+    text.className = 'cxd-row-label';
+    text.textContent = '登录时自动恢复壁纸';
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.disabled = !hasWorkshopApi();
+    const track = document.createElement('span');
+    track.className = 'cxd-switch';
+    row.append(text, input, track);
+
+    const hint = document.createElement('p');
+    hint.className = 'cxd-asset-hint';
+    hint.textContent = hasWorkshopApi()
+      ? '只在启动文件夹写入 Nuvio.lnk，不创建额外桌面快捷方式。'
+      : '需要 npm start 注入 Codex 后才能修改。';
+
+    async function load() {
+      if (!hasWorkshopApi()) return;
+      try {
+        const payload = await getAutostart();
+        const state = payload?.autostart || {};
+        input.checked = Boolean(state.enabled);
+        input.disabled = state.supported === false;
+        if (state.supported === false) {
+          hint.textContent = '当前系统不支持：macOS/Linux 请使用系统登录项。';
+        } else if (state.path) {
+          hint.textContent = state.enabled
+            ? `已启用：${state.path}`
+            : `未启用（将写入 ${state.path}）`;
+        }
+      } catch (error) {
+        input.disabled = true;
+        hint.textContent = error?.message || '读取自启状态失败';
+      }
+    }
+
+    input.addEventListener('change', async () => {
+      const desired = input.checked;
+      input.disabled = true;
+      try {
+        const payload = await setAutostart(desired);
+        const state = payload?.autostart || {};
+        input.checked = Boolean(state.enabled);
+        hint.textContent = state.enabled
+          ? `已启用：${state.path}`
+          : `未启用（将写入 ${state.path}）`;
+        flash(state.enabled ? '已开启开机自启' : '已关闭开机自启');
+      } catch (error) {
+        input.checked = !desired;
+        flash(error?.message || '修改自启失败');
+      } finally {
+        input.disabled = false;
+      }
+    });
+
+    group.append(row, hint);
+    load();
+    return group;
   }
 
   function buildAssets() {

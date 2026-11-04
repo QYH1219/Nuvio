@@ -75,6 +75,17 @@ export function deleteWorkshop(id) {
   });
 }
 
+export function getAutostart() {
+  return request('/api/autostart');
+}
+
+export function setAutostart(enabled) {
+  return request('/api/autostart', {
+    method: 'POST',
+    body: JSON.stringify({ enabled: Boolean(enabled) }),
+  });
+}
+
 export function previewUrl(id) {
   const info = controlInfo();
   if (!info) return '';

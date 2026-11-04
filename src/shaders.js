@@ -169,11 +169,15 @@ export const particleFragment = /* glsl */ `
 /*
  * Wallpaper Engine "scene" reproduction.
  *
- * This is a direct port of the two effect shaders used by the imported
- * wallpaper: effects/shake (flow-map UV shake) and effects/foliagesway
- * (MODE=0, noise + sine UV distortion). Math and defaults mirror the
- * original .frag/.vert files; the image is sampled in screen space so the
- * background keeps cover-fit on any window aspect ratio.
+ * `buildSceneShader` compiles only the effects that are actually present in
+ * the imported scene, in the same order Wallpaper Engine applies them. The
+ * pure displacement effects (shake, foliagesway, waterwaves, waterripple) are
+ * composed in UV space; `waterflow` is a multi-tap blend and is emitted as a
+ * colour stage on top of the displaced artwork.
+ *
+ * Math and defaults mirror the original effects/*.frag and effects/*.vert
+ * files; the image is sampled in screen space so the background keeps
+ * cover-fit on any window aspect ratio.
  */
 export const sceneVertex = /* glsl */ `
   varying vec2 vUv;
@@ -183,13 +187,10 @@ export const sceneVertex = /* glsl */ `
   }
 `;
 
-export const sceneFragment = /* glsl */ `
+const SCENE_HEADER = /* glsl */ `
   precision highp float;
 
   uniform sampler2D uTex;
-  uniform sampler2D uShake0;
-  uniform sampler2D uShake1;
-  uniform sampler2D uShake2;
 
   uniform float uTime;
   uniform float uParallax;
@@ -202,19 +203,7 @@ export const sceneFragment = /* glsl */ `
 
   uniform float uShakeAmount;
   uniform float uSwayAmount;
-  uniform float uMaskScale;
-  uniform float uShakeSpeed;
-  uniform float uShakeStrength;
-  uniform vec2 uShakeFriction;
-  uniform vec2 uShakeBounds;
-
-  uniform float uSwaySpeed;
-  uniform float uSwayStrength;
-  uniform float uSwayPhase;
-  uniform float uSwayPower;
-  uniform float uSwayRatio;
-  uniform float uSwayScale;
-  uniform float uSwayDirection;
+  uniform float uWaterAmount;
 
   varying vec2 vUv;
 
@@ -275,54 +264,287 @@ export const sceneFragment = /* glsl */ `
   vec2 fitUv(vec2 uv) {
     return uFitMode > 0.5 ? uv : coverUv(uv, uScreenAspect, uImageAspect);
   }
+`;
 
-  /*
-   * effects/shake.vert scales the flow-map lookup by maskSize / imageSize;
-   * the mask here is half-resolution, so uMaskScale is ~0.5.
-   */
-  vec2 shakeOffset(vec2 uv, sampler2D flowMap) {
-    vec2 flowColors = texture2D(flowMap, uv * uMaskScale).rg;
+function num(value, fallback = 0) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function stageMaskScale(stage) {
+  return num(stage.maskScale, 1);
+}
+
+function emitShake(stage) {
+  const p = stage.prefix;
+  return {
+    uniforms: [
+      `uniform sampler2D ${p}Mask;`,
+      `uniform float ${p}MaskScale;`,
+      `uniform float ${p}Speed;`,
+      `uniform float ${p}Strength;`,
+      `uniform vec2 ${p}Friction;`,
+      `uniform vec2 ${p}Bounds;`,
+    ],
+    code: /* glsl */ `
+  vec2 warp_${p}(vec2 uv) {
+    vec2 flowColors = texture2D(${p}Mask, clamp(uv, 0.0, 1.0) * ${p}MaskScale).rg;
     vec2 flowMask = (flowColors - vec2(0.498)) * 2.0;
 
-    float time = uShakeSpeed * uTime;
+    float time = ${p}Speed * uTime;
     float offset = sin(fract(time / HALF_PI) * HALF_PI);
     offset = offset * 0.498 + 0.5;
     float base = step(0.0, cos(time));
     offset = mix(
-      1.0 - pow(1.0 - offset, uShakeFriction.x),
-      pow(offset, uShakeFriction.y),
+      1.0 - pow(1.0 - offset, ${p}Friction.x),
+      pow(offset, ${p}Friction.y),
       base
     );
-    offset = clamp((offset - uShakeBounds.x) / max(uShakeBounds.y - uShakeBounds.x, 1e-5), 0.0, 1.0);
+    offset = clamp(
+      (offset - ${p}Bounds.x) / max(${p}Bounds.y - ${p}Bounds.x, 1e-5),
+      0.0,
+      1.0
+    );
     offset = offset * 2.0 - 1.0; // DIRECTION == center
 
-    return offset * uShakeStrength * uShakeStrength * flowMask;
+    return offset * ${p}Strength * ${p}Strength * flowMask * uShakeAmount;
+  }`,
+    warp: `warp_${p}`,
+  };
+}
+
+function emitFoliage(stage) {
+  const p = stage.prefix;
+  const maskSample = stage.hasMask
+    ? `amp *= texture2D(${p}Mask, clamp(uv, 0.0, 1.0) * ${p}MaskScale).r;`
+    : '';
+  const uniforms = [
+    `uniform float ${p}Speed;`,
+    `uniform float ${p}Strength;`,
+    `uniform float ${p}Phase;`,
+    `uniform float ${p}Power;`,
+    `uniform float ${p}Ratio;`,
+    `uniform float ${p}Scale;`,
+    `uniform float ${p}Direction;`,
+  ];
+  if (stage.hasMask) {
+    uniforms.push(`uniform sampler2D ${p}Mask;`, `uniform float ${p}MaskScale;`);
   }
+  return {
+    uniforms,
+    code: /* glsl */ `
+  vec2 warp_${p}(vec2 uv) {
+    // effects/foliagesway MODE == 0 (UV distortion).
+    float noise = fbm(uv * max(${p}Scale * 60.0, 0.25) + 11.7);
+    float amp = ${p}Strength * ${p}Strength * 0.005;
+    ${maskSample}
+    vec2 rotated = rotateUv(uv, ${p}Direction);
+    float phase = (noise * PI * 2.0 + rotated.x * 10.0 + rotated.y * 5.0) * ${p}Phase;
 
-  // effects/foliagesway with MODE == 0 (UV distortion) and MASK disabled.
-  vec2 swayOffset(vec2 uv) {
-    // The original samples util/noise at uv * scale. Keep the parameter live
-    // and map it onto the same low-frequency range for the procedural noise.
-    float noise = fbm(uv * max(uSwayScale * 60.0, 0.25) + 11.7);
-    float amp = uSwayStrength * uSwayStrength * 0.005;
-    vec2 rotated = rotateUv(uv, uSwayDirection);
-    float phase = (noise * PI * 2.0 + rotated.x * 10.0 + rotated.y * 5.0) * uSwayPhase;
-
-    float time = uSwaySpeed * uTime;
+    float time = ${p}Speed * uTime;
     vec4 sines = sin(phase + time * vec4(1.0, -0.16161616, 0.0083333, -0.00019841));
-    vec4 csines = sin(0.4 + phase + time * vec4(-0.5, 0.041666666, -0.0013888889, 0.000024801587));
+    vec4 csines = sin(
+      0.4 + phase + time * vec4(-0.5, 0.041666666, -0.0013888889, 0.000024801587)
+    );
 
-    sines = pow(abs(sines), vec4(uSwayPower)) * sign(sines);
-    csines = pow(abs(csines), vec4(uSwayPower)) * sign(csines);
+    sines = pow(abs(sines), vec4(${p}Power)) * sign(sines);
+    csines = pow(abs(csines), vec4(${p}Power)) * sign(csines);
 
-    float aspect = uImageAspect * uSwayRatio;
-    vec2 dir = rotateUv(vec2(1.0 / aspect, aspect), uSwayDirection);
+    // Wallpaper Engine derives the aspect from the previous render target,
+    // not from the artwork texture. In cover mode those differ.
+    float aspect = uScreenAspect * ${p}Ratio;
+    vec2 dir = rotateUv(vec2(1.0 / aspect, aspect), ${p}Direction);
     vec2 offset = vec2(
       dir.x * dot(sines, vec4(amp)),
       dir.y * dot(csines, vec4(amp))
     );
     return offset * uSwayAmount;
+  }`,
+    warp: `warp_${p}`,
+  };
+}
+
+function emitWaterWaves(stage) {
+  const p = stage.prefix;
+  const maskSample = stage.hasMask
+    ? `float mask = texture2D(${p}Mask, clamp(uv, 0.0, 1.0) * ${p}MaskScale).r;`
+    : 'float mask = 1.0;';
+  const uniforms = [
+    `uniform float ${p}Direction;`,
+    `uniform float ${p}Scale;`,
+    `uniform float ${p}Speed;`,
+    `uniform float ${p}Strength;`,
+    `uniform float ${p}Perspective;`,
+  ];
+  if (stage.hasMask) {
+    uniforms.push(`uniform sampler2D ${p}Mask;`, `uniform float ${p}MaskScale;`);
   }
+  return {
+    uniforms,
+    code: /* glsl */ `
+  vec2 warp_${p}(vec2 uv) {
+    ${maskSample}
+    vec2 dir = vec2(-sin(${p}Direction), cos(${p}Direction));
+    vec2 tc = uv;
+    float pos = abs(dot(tc - 0.5, dir));
+    float distance = uTime * ${p}Speed + dot(tc, dir) * (${p}Scale + ${p}Perspective * pos);
+    vec2 offset = vec2(dir.y, -dir.x);
+    float strength = ${p}Strength * ${p}Strength + ${p}Perspective * pos;
+    return sin(distance) * offset * strength * mask * uWaterAmount;
+  }`,
+    warp: `warp_${p}`,
+  };
+}
+
+function emitWaterRipple(stage) {
+  const p = stage.prefix;
+  return {
+    uniforms: [
+      `uniform sampler2D ${p}Mask;`,
+      `uniform sampler2D ${p}Normal;`,
+      `uniform float ${p}MaskScale;`,
+      `uniform float ${p}AnimSpeed;`,
+      `uniform float ${p}Scale;`,
+      `uniform float ${p}ScrollSpeed;`,
+      `uniform float ${p}Direction;`,
+      `uniform float ${p}Ratio;`,
+      `uniform float ${p}Strength;`,
+    ],
+    code: /* glsl */ `
+  vec2 warp_${p}(vec2 uv) {
+    float mask = texture2D(${p}Mask, clamp(uv, 0.0, 1.0) * ${p}MaskScale).r;
+    vec2 tc = uv;
+    vec2 scroll = vec2(-sin(${p}Direction), cos(${p}Direction)) *
+      ${p}ScrollSpeed * ${p}ScrollSpeed * uTime;
+    float travel = uTime * ${p}AnimSpeed * ${p}AnimSpeed;
+
+    vec4 ripple;
+    ripple.xy = tc + travel + scroll;
+    ripple.zw = tc * 1.333 - travel + scroll;
+    ripple *= ${p}Scale;
+    ripple.xz *= max(uImageAspect, 1e-4);
+    ripple.yw *= ${p}Ratio;
+
+    vec3 n1 = texture2D(${p}Normal, ripple.xy).xyz * 2.0 - 1.0;
+    vec3 n2 = texture2D(${p}Normal, ripple.zw).xyz * 2.0 - 1.0;
+    vec3 normal = normalize(vec3(n1.xy + n2.xy, n1.z));
+    return normal.xy * ${p}Strength * ${p}Strength * mask * uWaterAmount;
+  }`,
+    warp: `warp_${p}`,
+  };
+}
+
+function emitWaterFlow(stage) {
+  const p = stage.prefix;
+  return {
+    uniforms: [
+      `uniform sampler2D ${p}Mask;`,
+      `uniform sampler2D ${p}Phase;`,
+      `uniform float ${p}MaskScale;`,
+      `uniform float ${p}Speed;`,
+      `uniform float ${p}Strength;`,
+      `uniform float ${p}PhaseScale;`,
+    ],
+    code: /* glsl */ `
+  vec3 flow_${p}(vec3 prev, vec2 uv) {
+    vec2 flowColors = texture2D(${p}Mask, clamp(uv, 0.0, 1.0) * ${p}MaskScale).rg;
+    vec2 flowMask = (flowColors - vec2(0.498)) * 2.0;
+    float flowAmount = clamp(length(flowMask), 0.0, 1.0);
+    if (flowAmount <= 0.001) return prev;
+
+    float flowPhase = texture2D(${p}Phase, uv * ${p}PhaseScale).r;
+    float t = uTime * ${p}Speed;
+    float c0 = fract(t);
+    float c1 = fract(t + 0.5);
+    float c2 = fract(0.25 + t);
+    float c3 = fract(0.25 + t + 0.5);
+    float blend = 2.0 * abs(c0 - 0.5);
+    float blend2 = 2.0 * abs(c2 - 0.5);
+
+    vec4 cycles = vec4(c0, c1, c2, c3) - 0.5;
+    vec4 offA = (flowMask.xyxy * ${p}Strength * 0.1) * cycles.xxyy;
+    vec4 offB = (flowMask.xyxy * ${p}Strength * 0.1) * cycles.zzww;
+
+    // uv is already displaced by the warp chain. Sampling the artwork with
+    // the flow offset directly avoids re-running every warp pass per tap
+    // (12 effects x 4 taps would otherwise be 48 extra mask fetches / pixel).
+    vec3 a = mix(
+      texture2D(uTex, clamp(uv + offA.xy, 0.0, 1.0)).rgb,
+      texture2D(uTex, clamp(uv + offA.zw, 0.0, 1.0)).rgb,
+      blend
+    );
+    vec3 b = mix(
+      texture2D(uTex, clamp(uv + offB.xy, 0.0, 1.0)).rgb,
+      texture2D(uTex, clamp(uv + offB.zw, 0.0, 1.0)).rgb,
+      blend2
+    );
+    a = mix(a, b, smoothstep(0.2, 0.8, flowPhase));
+    return mix(prev, a, flowAmount * uWaterAmount);
+  }`,
+    flow: `flow_${p}`,
+  };
+}
+
+const SCENE_EMITTERS = {
+  shake: emitShake,
+  foliagesway: emitFoliage,
+  waterwaves: emitWaterWaves,
+  waterripple: emitWaterRipple,
+  waterflow: emitWaterFlow,
+};
+
+/**
+ * Compile a scene effect pipeline into a single fragment shader.
+ *
+ * @param {Array<{type:string,prefix:string,hasMask?:boolean,hasNormal?:boolean,
+ *   hasPhase?:boolean,maskScale?:number}>} stages
+ */
+export function buildSceneShader(stages = []) {
+  const declarations = [];
+  const warpCode = [];
+  const flowCode = [];
+  const warps = [];
+  const flows = [];
+
+  for (const stage of stages) {
+    const emitter = SCENE_EMITTERS[stage.type];
+    if (!emitter) continue;
+    const built = emitter(stage);
+    declarations.push(...built.uniforms);
+    if (built.warp) {
+      warpCode.push(built.code);
+      warps.push(built.warp);
+    }
+    if (built.flow) {
+      flowCode.push(built.code);
+      flows.push(built.flow);
+    }
+  }
+
+  // Wallpaper Engine applies the effect array top-to-bottom. Each pass reads
+  // the previous pass output, so pass 1 must run first and pass N last.
+  const warpBody = warps
+    .map((fn) => `    uv += ${fn}(uv);`)
+    .join('\n');
+
+  const flowBody = flows.map((fn) => `    col = ${fn}(col, warpedUv);`).join('\n');
+
+  return `${SCENE_HEADER}
+
+${declarations.join('\n')}
+
+${warpCode.join('\n')}
+
+  vec2 warpAll(vec2 uv) {
+${warpBody || '    // no displacement effects'}
+    return uv;
+  }
+
+  vec3 sampleWarped(vec2 uv) {
+    return texture2D(uTex, clamp(warpAll(uv), 0.0, 1.0)).rgb;
+  }
+
+${flowCode.join('\n')}
 
   void main() {
     // Screen-space UV: independent of the (enlarged) background quad, so the
@@ -330,26 +552,17 @@ export const sceneFragment = /* glsl */ `
     vec2 screenUv = gl_FragCoord.xy / max(uResolution, vec2(1.0));
     screenUv.y = 1.0 - screenUv.y; // top-left origin, matching WE texture space
 
-    vec2 uv = fitUv(screenUv);
+    vec2 sceneUv = fitUv(screenUv);
     // Scene quads in Wallpaper Engine are slightly enlarged (scale 1.05).
     // Cover mode reproduces that crop; stretch must keep the full frame.
-    if (uFitMode < 0.5) uv = (uv - 0.5) * TEX_MARGIN + 0.5;
+    if (uFitMode < 0.5) sceneUv = (sceneUv - 0.5) * TEX_MARGIN + 0.5;
 
     // cameraparallax: amount 0.1, mouseinfluence 0.5 (normalized to taste).
-    uv += uMouse * vec2(0.012, 0.0085) * uParallax;
+    sceneUv += uMouse * vec2(0.012, 0.0085) * uParallax;
 
-    // Effect chain from scene.json is applied last-to-first, because each
-    // pass samples the previous render target.
-    uv += shakeOffset(uv, uShake2);
-    uv += shakeOffset(uv, uShake1);
-    uv += shakeOffset(uv, uShake0);
-    uv += swayOffset(uv);
-
-    // Effects can push UVs past the artwork edge. Clamp instead of revealing
-    // empty texture space, so stretch mode never loses part of the image.
-    uv = clamp(uv, 0.0, 1.0);
-
-    vec3 col = texture2D(uTex, uv).rgb;
+    vec2 warpedUv = clamp(warpAll(sceneUv), 0.0, 1.0);
+    vec3 col = texture2D(uTex, warpedUv).rgb;
+${flowBody || '    // no flow composites'}
     col *= 1.0 - uDim * 0.62;
 
     gl_FragColor = vec4(col, 1.0);
@@ -357,6 +570,7 @@ export const sceneFragment = /* glsl */ `
     #include <colorspace_fragment>
   }
 `;
+}
 
 export const gradeShader = {
   uniforms: {

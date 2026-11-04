@@ -219,6 +219,18 @@ html[data-cxd-wallpaper="on"] body [class*="_MainContentTopFade"] {
   display: none !important;
 }
 
+/* Codex keeps two 1px separator layers around the titlebar/thread boundary.
+   They are useful against the stock surface, but over artwork they read as a
+   bright horizontal seam. Remove only those hairline layers; the transcript
+   itself and the footer share the same hashed class and must stay visible. */
+html[data-cxd-wallpaper="on"] body [data-app-shell-header-layout]::after,
+html[data-cxd-wallpaper="on"] body div[class*="_shiftWithTranscript_"].h-px {
+  display: none !important;
+  background: transparent !important;
+  background-image: none !important;
+  box-shadow: none !important;
+}
+
 html[data-cxd-background] [data-cxd-background-layer] {
   position: fixed !important;
   inset: 0 !important;

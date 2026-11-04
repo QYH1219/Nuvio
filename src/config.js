@@ -80,6 +80,7 @@ export const DEFAULTS = {
   modelY: -0.02,
   sceneShake: 1,
   sceneSway: 1,
+  sceneWater: 1,
   particles: true,
   codexMock: true,
   surfaceOpacity: 0.22,

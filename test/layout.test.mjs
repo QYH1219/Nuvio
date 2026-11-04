@@ -95,3 +95,16 @@ test('landing-page composer body and action bar are flattened', () => {
     'the composer root must use the dedicated translucent tint',
   );
 });
+
+test('wallpaper mode removes titlebar and thread hairline seams', () => {
+  assert.match(
+    embed,
+    /\[data-app-shell-header-layout\]::after[\s\S]*?div\[class\*="_shiftWithTranscript_"\]\.h-px[\s\S]*?display:\s*none !important/,
+    'only the 1px header/thread separators must be hidden',
+  );
+  assert.doesNotMatch(
+    embed,
+    /\[class\*="_shiftWithTranscript_"\]\s*\{[^}]*display:\s*none/s,
+    'hiding the whole hashed class would remove the transcript and footer too',
+  );
+});

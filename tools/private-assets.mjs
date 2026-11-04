@@ -11,8 +11,15 @@ import { existsSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 
 const PRIVATE_PATTERNS = [
+  // Local shader-preview fixtures. They are extracted from a user's Wallpaper
+  // Engine scene purely for development and must never reach a release build.
+  /^__shader-preview__\//i,
   /^assets\/wallpaper\//i,
   /^assets\/library\//i,
+  // `active.json` is a pointer at the user's current library entry. Shipping
+  // it would make every fresh install try to load artwork that was stripped
+  // from the archive, which shows up as a blank/fallback background.
+  /^assets\/active\.json$/i,
   /^assets\/background\.(png|jpe?g|webp|avif|gif|mp4|webm|m4v|mov)$/i,
   /^assets\/model\.(glb|gltf|bin)$/i,
 ];

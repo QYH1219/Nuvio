@@ -6,8 +6,9 @@
  *   npm run autostart -- disable
  *   npm run autostart -- status
  *
- * Uses the per-user Startup folder. The shortcut starts minimized; start.mjs
- * detaches the injector and exits, so nothing stays on screen.
+ * Only one shortcut is ever written: `%APPDATA%\...\Startup\Nuvio.lnk`.
+ * The desktop shortcut is not touched. The injector imports these helpers so
+ * the settings panel and the CLI share exactly the same code path.
  */
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -18,6 +19,10 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ICON = join(ROOT, 'public', 'icon.ico');
 const NAME = 'Nuvio.lnk';
 
+export function autostartSupported() {
+  return process.platform === 'win32';
+}
+
 function psQuote(value) {
   return `'${String(value).replace(/'/g, "''")}'`;
 }
@@ -27,52 +32,116 @@ function runPowerShell(script) {
   const result = spawnSync(
     'powershell.exe',
     ['-NoProfile', '-NonInteractive', '-EncodedCommand', encoded],
-    { stdio: 'inherit', windowsHide: true },
+    { encoding: 'utf8', windowsHide: true },
   );
-  if (result.status !== 0) throw new Error(`PowerShell exited with code ${result.status}`);
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    const detail = (result.stderr || result.stdout || '').trim();
+    throw new Error(`PowerShell exited with code ${result.status}${detail ? `: ${detail}` : ''}`);
+  }
+  return (result.stdout || '').trim();
 }
 
-function scriptFor(action) {
+function statusScript() {
+  return [
+    "$ErrorActionPreference = 'Stop'",
+    "$startup = [Environment]::GetFolderPath('Startup')",
+    `$path = Join-Path $startup ${psQuote(NAME)}`,
+    '[pscustomobject]@{ enabled = (Test-Path -LiteralPath $path); path = $path } | ConvertTo-Json -Compress',
+  ].join('\n');
+}
+
+export function getAutostartStatus() {
+  if (!autostartSupported()) {
+    return { supported: false, enabled: false, path: '', platform: process.platform };
+  }
+  const output = runPowerShell(statusScript());
+  let parsed = null;
+  try {
+    parsed = JSON.parse(output);
+  } catch {
+    parsed = null;
+  }
+  return {
+    supported: true,
+    enabled: Boolean(parsed?.enabled),
+    path: typeof parsed?.path === 'string' ? parsed.path : '',
+    platform: process.platform,
+  };
+}
+
+export function enableAutostart() {
+  if (!autostartSupported()) {
+    throw new Error('开机自启仅支持 Windows；macOS/Linux 请使用系统登录项');
+  }
   const lines = [
     "$ErrorActionPreference = 'Stop'",
     "$startup = [Environment]::GetFolderPath('Startup')",
     `$path = Join-Path $startup ${psQuote(NAME)}`,
+    '$shell = New-Object -ComObject WScript.Shell',
+    '$link = $shell.CreateShortcut($path)',
+    `$link.TargetPath = ${psQuote(join(ROOT, 'start.cmd'))}`,
+    '$link.Arguments = ""',
+    `$link.WorkingDirectory = ${psQuote(ROOT)}`,
+    "$link.Description = 'Nuvio · 登录时恢复动态壁纸'",
   ];
-  if (action === 'status') {
-    lines.push("if (Test-Path -LiteralPath $path) { Write-Host '[nuvio] autostart: enabled'; Write-Host $path } else { Write-Host '[nuvio] autostart: disabled' }");
-    return lines.join('\n');
-  }
-  if (action === 'disable') {
-    lines.push("if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force; Write-Host '[nuvio] autostart disabled' } else { Write-Host '[nuvio] autostart already disabled' }");
-    return lines.join('\n');
-  }
-  lines.push('$shell = New-Object -ComObject WScript.Shell');
-  lines.push('$link = $shell.CreateShortcut($path)');
-  lines.push(`$link.TargetPath = ${psQuote(join(ROOT, 'start.cmd'))}`);
-  lines.push('$link.Arguments = ""');
-  lines.push(`$link.WorkingDirectory = ${psQuote(ROOT)}`);
-  lines.push("$link.Description = 'Nuvio · 登录时恢复动态壁纸'");
   if (existsSync(ICON)) lines.push(`$link.IconLocation = ${psQuote(`${ICON},0`)}`);
   lines.push('$link.WindowStyle = 7');
   lines.push('$link.Save()');
-  lines.push("Write-Host '[nuvio] autostart enabled' $path");
-  return lines.join('\n');
+  runPowerShell(lines.join('\n'));
+  return getAutostartStatus();
+}
+
+export function disableAutostart() {
+  if (!autostartSupported()) {
+    return { supported: false, enabled: false, path: '', platform: process.platform };
+  }
+  const lines = [
+    "$ErrorActionPreference = 'Stop'",
+    "$startup = [Environment]::GetFolderPath('Startup')",
+    `$path = Join-Path $startup ${psQuote(NAME)}`,
+    'if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force }',
+  ];
+  runPowerShell(lines.join('\n'));
+  return getAutostartStatus();
+}
+
+export function setAutostart(enabled) {
+  return enabled ? enableAutostart() : disableAutostart();
 }
 
 function main() {
-  if (process.platform !== 'win32') {
-    throw new Error('autostart is Windows-only; use a login item on macOS/Linux');
-  }
   const action = process.argv[2] || 'status';
   if (!['enable', 'disable', 'status'].includes(action)) {
     throw new Error('usage: npm run autostart -- enable|disable|status');
   }
-  runPowerShell(scriptFor(action));
+  if (action === 'status') {
+    const status = getAutostartStatus();
+    console.log(
+      status.supported
+        ? `[nuvio] autostart: ${status.enabled ? 'enabled' : 'disabled'}${status.path ? ` (${status.path})` : ''}`
+        : '[nuvio] autostart: unsupported on this platform',
+    );
+    return;
+  }
+  const status = setAutostart(action === 'enable');
+  console.log(`[nuvio] autostart ${action === 'enable' ? 'enabled' : 'disabled'}: ${status.path}`);
 }
 
-try {
-  main();
-} catch (error) {
-  console.error(`[nuvio] autostart failed: ${error.message}`);
-  process.exitCode = 1;
+const isCli = (() => {
+  if (!process.argv[1]) return false;
+  try {
+    return resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+})();
+
+if (isCli) {
+  try {
+    main();
+  } catch (error) {
+    console.error(`[nuvio] autostart failed: ${error.message}`);
+    process.exitCode = 1;
+  }
 }

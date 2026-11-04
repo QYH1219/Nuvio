@@ -114,6 +114,23 @@ function runNpm(script) {
   runNpmCommand(['run', script]);
 }
 
+function killTree(pid) {
+  const value = Number(pid);
+  if (!Number.isInteger(value) || value <= 0) return;
+  if (IS_WIN) {
+    spawnSync('taskkill', ['/PID', String(value), '/T', '/F'], {
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+    return;
+  }
+  try {
+    process.kill(value, 'SIGTERM');
+  } catch {
+    /* already gone */
+  }
+}
+
 function installDependencies() {
   runNpmCommand(['install']);
 }
@@ -161,12 +178,15 @@ function listCodexPids() {
  * the renderer localStorage, so restarting does not reset the user's wallpaper.
  */
 async function stopCodex() {
+  if (!IS_WIN) {
+    throw new Error(
+      'restarting Codex automatically is Windows-only. Quit Codex, then relaunch it with ' +
+        '--remote-debugging-port=9222 (tools/launch-codex.sh) and run npm start again.',
+    );
+  }
   const pids = listCodexPids();
   for (const pid of pids) {
-    spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], {
-      stdio: 'ignore',
-      windowsHide: true,
-    });
+    killTree(pid);
   }
   const deadline = Date.now() + 15000;
   while (Date.now() < deadline && listCodexPids().length) await sleep(300);
@@ -191,10 +211,7 @@ async function probeInjector() {
 
 async function stopInjector(status) {
   if (!status?.pid) return;
-  spawnSync('taskkill', ['/PID', String(status.pid), '/T', '/F'], {
-    stdio: 'ignore',
-    windowsHide: true,
-  });
+  killTree(status.pid);
   await sleep(600);
 }
 
@@ -207,7 +224,17 @@ function readState() {
 }
 
 function commandLineOf(pid) {
-  if (!IS_WIN) return '';
+  if (!IS_WIN) {
+    try {
+      const result = spawnSync('ps', ['-p', String(Number(pid)), '-o', 'command='], {
+        encoding: 'utf8',
+        timeout: 4000,
+      });
+      return result.stdout || '';
+    } catch {
+      return '';
+    }
+  }
   try {
     const result = spawnSync(
       'powershell.exe',
@@ -249,10 +276,7 @@ async function cleanupOrphanInjector() {
   const command = commandLineOf(Number(state.pid));
   if (!/inject\.mjs/i.test(command)) return;
   console.log(`[nuvio] cleaning up stale injector (pid ${state.pid}) ...`);
-  spawnSync('taskkill', ['/PID', String(state.pid), '/T', '/F'], {
-    stdio: 'ignore',
-    windowsHide: true,
-  });
+  killTree(state.pid);
 }
 
 async function waitForInjector(seconds) {
@@ -343,10 +367,19 @@ async function waitForCdp(port, seconds) {
 
 function launchCodex(port) {
   if (!IS_WIN) {
-    throw new Error(
-      'automatic launch is Windows-only. Start Codex Desktop with ' +
-        `--remote-debugging-port=${port}, then run: npm start -- --no-launch`,
-    );
+    const script = join(ROOT, 'tools', 'launch-codex.sh');
+    if (!existsSync(script)) {
+      throw new Error(`missing ${script}; start Codex with --remote-debugging-port=${port}`);
+    }
+    // The script execs Codex, so it must not block the launcher.
+    const child = spawn('bash', [script, String(port)], {
+      cwd: ROOT,
+      stdio: 'ignore',
+      detached: true,
+    });
+    child.on('error', () => {});
+    child.unref();
+    return;
   }
   run('powershell.exe', [
     '-NoProfile',

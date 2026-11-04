@@ -12,8 +12,9 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { createServer } from 'node:http';
-import { extname, join, normalize, resolve, sep } from 'node:path';
+import { dirname, extname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { gzipSync } from 'node:zlib';
 import { buildCleanupExpression } from './cleanup-expression.mjs';
 import {
   applyLibraryEntry,
@@ -23,6 +24,7 @@ import {
   jobState,
   listWorkshop,
 } from './library.mjs';
+import { getAutostartStatus, setAutostart } from './autostart.mjs';
 import { selectTarget } from './target-score.mjs';
 import { findEntry } from './workshop-scan.mjs';
 
@@ -47,10 +49,20 @@ const MIME = {
   '.ktx2': 'image/ktx2',
   '.m4v': 'video/mp4',
   '.mp4': 'video/mp4',
+  '.mp3': 'audio/mpeg',
+  '.ogg': 'audio/ogg',
+  '.oga': 'audio/ogg',
+  '.wav': 'audio/wav',
+  '.m4a': 'audio/mp4',
   '.png': 'image/png',
+  '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon',
+  '.ttf': 'font/ttf',
+  '.otf': 'font/otf',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
   '.wasm': 'application/wasm',
   '.webm': 'video/webm',
-  '.webp': 'image/webp',
   '.webp': 'image/webp',
 };
 
@@ -72,6 +84,7 @@ function parseArgs(argv) {
     assetBase: '',
     reload: true,
     serve: true,
+    lazy: null,
     wait: 0,
     once: false,
     daemon: false,
@@ -102,6 +115,8 @@ function parseArgs(argv) {
     else if (arg === '--asset-base') options.assetBase = next();
     else if (arg === '--no-reload') options.reload = false;
     else if (arg === '--no-serve') options.serve = false;
+    else if (arg === '--lazy') options.lazy = true;
+    else if (arg === '--full') options.lazy = false;
     else if (arg === '--wait') {
       const value = Number(next());
       if (!Number.isFinite(value) || value < 0) {
@@ -142,6 +157,8 @@ Options:
   --asset-base URL     override the asset base URL
   --no-reload          inject into the current document without reloading
   --no-serve           do not start the local asset server
+  --lazy               force the cached HTTP runtime (default when CSP allows)
+  --full               force the inline bundle (no local HTTP dependency)
   --wait SECONDS       wait for the CDP port instead of failing immediately
   --once               exit after injecting instead of staying resident
   --daemon             keep running without a console; log to .nuvio/injector.log
@@ -268,13 +285,34 @@ function startStaticServer(options) {
     throw new Error(`missing asset directory: ${options.assets}`);
   }
   console.log(`[nuvio] assets: ${options.assets}`);
+  // Compressing the injected runtime and large web-wallpaper HTML on the fly
+  // is a measurable win: the IIFE drops from ~800 KB to ~230 KB on the wire.
+  const compressed = new Map();
+  const compressible = /^(text\/|application\/(json|javascript|wasm)|image\/svg)/;
   const server = createServer((request, response) => {
+    // Codex runs from `app://-`, so every response — including 404 probes for
+    // optional assets — must carry CORS. A bare 404 without these headers is
+    // surfaced as a network error and makes the asset probe chain give up.
+    response.setHeader('Access-Control-Allow-Origin', '*');
+    response.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+    response.setHeader('Access-Control-Allow-Headers', '*');
+    response.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+
     try {
       const url = new URL(request.url || '/', 'http://127.0.0.1');
       let pathname = decodeURIComponent(url.pathname);
       let base = null;
 
-      if (pathname.startsWith('/assets/')) {
+      if (request.method === 'OPTIONS') {
+        response.writeHead(204);
+        response.end();
+        return;
+      }
+
+      if (pathname === '/bundle.js') {
+        base = dirname(options.bundle);
+        pathname = options.bundle.replace(/^.*[/\\]/, '');
+      } else if (pathname.startsWith('/assets/')) {
         base = options.assets;
         pathname = pathname.slice('/assets/'.length);
       } else if (pathname.startsWith('/vendor/')) {
@@ -295,25 +333,42 @@ function startStaticServer(options) {
       }
 
       const stat = statSync(file);
-      response.setHeader('Access-Control-Allow-Origin', '*');
-      response.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
-      response.setHeader('Access-Control-Allow-Headers', '*');
-      response.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+      const type = contentType(file);
       response.setHeader('Cache-Control', 'no-cache');
-      response.setHeader('Content-Type', contentType(file));
-      response.setHeader('Content-Length', stat.size);
+      response.setHeader('Content-Type', type);
+      const etag = `W/"${stat.size.toString(16)}-${Math.round(stat.mtimeMs).toString(16)}"`;
+      response.setHeader('ETag', etag);
 
-      if (request.method === 'OPTIONS') {
-        response.writeHead(204);
+      if (request.headers['if-none-match'] === etag) {
+        response.writeHead(304);
         response.end();
         return;
       }
+
       if (request.method === 'HEAD') {
         response.writeHead(200);
         response.end();
         return;
       }
 
+      const acceptsGzip = /\bgzip\b/.test(String(request.headers['accept-encoding'] || ''));
+      if (acceptsGzip && compressible.test(type) && stat.size > 1024) {
+        const key = `${file}:${stat.size}:${Math.round(stat.mtimeMs)}`;
+        let body = compressed.get(key);
+        if (!body) {
+          body = gzipSync(readFileSync(file), { level: 6 });
+          if (compressed.size > 24) compressed.clear();
+          compressed.set(key, body);
+        }
+        response.setHeader('Content-Encoding', 'gzip');
+        response.setHeader('Vary', 'Accept-Encoding');
+        response.setHeader('Content-Length', body.length);
+        response.writeHead(200);
+        response.end(body);
+        return;
+      }
+
+      response.setHeader('Content-Length', stat.size);
       response.writeHead(200);
       createReadStream(file).pipe(response);
     } catch (error) {
@@ -453,6 +508,7 @@ function startControlServer(options, token, hooks) {
       url.pathname === '/restore' ||
       url.pathname === '/config' ||
       url.pathname === '/reload' ||
+      url.pathname === '/api/autostart' ||
       url.pathname.startsWith('/api/workshop/') ||
       url.pathname.startsWith('/api/library/');
     if (!isApi) {
@@ -471,6 +527,10 @@ function startControlServer(options, token, hooks) {
       }
       if (request.method === 'GET' && url.pathname === '/api/workshop/list') {
         send(200, { ok: true, ...listWorkshop() });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/api/autostart') {
+        send(200, { ok: true, autostart: getAutostartStatus() });
         return;
       }
       if (request.method === 'GET' && url.pathname === '/api/workshop/progress') {
@@ -503,6 +563,11 @@ function startControlServer(options, token, hooks) {
         const result = await hooks.restore(payload);
         send(200, { ok: true, ...result });
         setTimeout(() => hooks.shutdown(), 200);
+        return;
+      }
+      if (url.pathname === '/api/autostart') {
+        const enabled = Boolean(payload.enabled);
+        send(200, { ok: true, autostart: setAutostart(enabled) });
         return;
       }
       if (url.pathname === '/api/workshop/import') {
@@ -728,9 +793,17 @@ export function inlineSceneAssets(assetsDir) {
     ...data,
     image: inlineOne(data.image),
     pipeline: Array.isArray(data.pipeline)
-      ? data.pipeline.map((entry) =>
-          entry && entry.mask ? { ...entry, mask: inlineOne(entry.mask) } : entry,
-        )
+      ? data.pipeline.map((entry) => {
+          if (!entry) return entry;
+          const next = { ...entry };
+          if (entry.mask) next.mask = inlineOne(entry.mask);
+          if (entry.textures && typeof entry.textures === 'object') {
+            next.textures = Object.fromEntries(
+              Object.entries(entry.textures).map(([key, value]) => [key, inlineOne(value)]),
+            );
+          }
+          return next;
+        })
       : data.pipeline,
     inline: true,
   };
@@ -776,17 +849,23 @@ async function main() {
   const bundle = readFileSync(options.bundle, 'utf8');
   // Only auto-inline the project wallpaper when the caller did not request an
   // explicit external source; explicit flags keep their normal URL semantics.
-  const defaultScene =
-    !options.image && !options.video && !options.scene
-      ? inlineSceneAssets(options.assets)
-      : null;
+  const wantInlineScene = !options.image && !options.video && !options.scene;
+  let defaultSceneCache;
+  const defaultScene = () => {
+    if (defaultSceneCache === undefined) {
+      defaultSceneCache = wantInlineScene ? inlineSceneAssets(options.assets) : null;
+    }
+    return defaultSceneCache;
+  };
   const explicitAssets = {
     imageUrl: withAssetBase(options.image, assetBase),
     videoUrl: withAssetBase(options.video, assetBase),
     sceneUrl: withAssetBase(options.scene, assetBase),
     modelUrl: withAssetBase(options.model, assetBase),
-    sceneData: defaultScene || undefined,
   };
+  const bundleUrl = assetServer
+    ? `${assetBase}bundle.js?v=${Math.round(statSync(options.bundle).mtimeMs).toString(36)}`
+    : null;
   const overrides = {};
   if (Number.isFinite(options.surface)) {
     overrides.surfaceOpacity = Math.min(1, Math.max(0, options.surface));
@@ -794,7 +873,11 @@ async function main() {
   if (Number.isFinite(options.dim)) {
     overrides.dim = Math.min(1, Math.max(0, options.dim));
   }
-  function buildSource(controlBase, controlToken) {
+  function buildSource(controlBase, controlToken, mode = 'full') {
+    const lazy = mode === 'lazy' && Boolean(bundleUrl);
+    const assetsPayload = lazy
+      ? { ...explicitAssets }
+      : { ...explicitAssets, sceneData: defaultScene() || undefined };
     const prelude = `
 (() => {
   const overrides = ${JSON.stringify(overrides)};
@@ -806,7 +889,7 @@ async function main() {
     try { localStorage.setItem(key, JSON.stringify(config)); } catch {}
   }
   window.__CXD_ASSET_BASE__ = ${JSON.stringify(assetBase)};
-  window.__CXD_ASSETS__ = ${JSON.stringify(explicitAssets)};
+  window.__CXD_ASSETS__ = ${JSON.stringify(assetsPayload)};
   window.__CXD_CONTROL__ = ${JSON.stringify({ base: controlBase || '', token: controlToken || '' })};
   try {
     document.documentElement.dataset.cxdBackground = 'on';
@@ -815,7 +898,27 @@ async function main() {
   }
 })();
 `;
-    return `${prelude}\n${bundle}`;
+    if (!lazy) return `${prelude}\n${bundle}`;
+    // The 800 KB runtime is fetched from the local server instead of being
+    // re-sent through CDP and re-parsed on every document creation. The
+    // browser caches it, so reloads only pay for the tiny loader below.
+    const loader = `
+(() => {
+  const url = ${JSON.stringify(bundleUrl)};
+  fetch(url, { cache: 'force-cache' })
+    .then((res) => {
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return res.text();
+    })
+    .then((code) => {
+      (0, eval)(code + '\\n//# sourceURL=nuvio-runtime.js');
+    })
+    .catch((error) => {
+      try { console.warn('[nuvio] lazy runtime failed', error); } catch {}
+    });
+})();
+`;
+    return `${prelude}\n${loader}`;
   }
 
   let cdp;
@@ -1006,11 +1109,7 @@ async function main() {
       });
       console.log(`[nuvio] control: http://127.0.0.1:${controlServer.port}/status`);
     }
-    source = buildSource(
-      controlServer ? `http://127.0.0.1:${controlServer.port}` : '',
-      controlServer ? controlToken : '',
-    );
-
+    const controlBase = controlServer ? `http://127.0.0.1:${controlServer.port}` : '';
     await cdp.send('Page.enable');
     await cdp.send('Runtime.enable');
     // Codex ships a strict CSP on its app:// document. Data URLs in our
@@ -1021,6 +1120,31 @@ async function main() {
     } catch (error) {
       console.warn(`[nuvio] Page.setBypassCSP unavailable: ${error.message}`);
     }
+
+    // Pick the injection strategy: a tiny loader that fetches the runtime
+    // from the local server when CSP bypass makes that possible, otherwise the
+    // full inline bundle (the historical, always-works path).
+    let injectionMode = 'full';
+    if (options.lazy !== false && bundleUrl) {
+      try {
+        const probe = await cdp.send('Runtime.evaluate', {
+          expression: `fetch(${JSON.stringify(bundleUrl)},{method:'HEAD',cache:'no-store'}).then(r=>r.ok).catch(()=>false)`,
+          awaitPromise: true,
+          returnByValue: true,
+        });
+        if (probe.result?.value === true) injectionMode = 'lazy';
+      } catch {
+        /* probe failure means inline */
+      }
+    } else if (options.lazy === true) {
+      console.warn('[nuvio] --lazy needs the built-in asset server; using inline bundle');
+    }
+    source = buildSource(controlBase, controlToken, injectionMode);
+    console.log(
+      injectionMode === 'lazy'
+        ? '[nuvio] injection: lazy runtime (cached over HTTP)'
+        : '[nuvio] injection: inline bundle',
+    );
     registered = await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source });
 
     if (options.reload) {
@@ -1037,11 +1161,53 @@ async function main() {
       await sleep(600);
     }
 
-    const check = await cdp.send('Runtime.evaluate', {
-      expression: "Boolean(document.getElementById('cxd-bg-root'))",
-      returnByValue: true,
-    });
-    if (!check.result?.value) {
+    const rootExists = async (client, timeoutMs) => {
+      const deadline = Date.now() + timeoutMs;
+      for (;;) {
+        try {
+          const check = await client.send('Runtime.evaluate', {
+            expression: "Boolean(document.getElementById('cxd-bg-root'))",
+            returnByValue: true,
+          });
+          if (check.result?.value) return true;
+        } catch {
+          /* page may be mid-navigation */
+        }
+        if (Date.now() >= deadline) return false;
+        await sleep(250);
+      }
+    };
+
+    let ready = await rootExists(cdp, injectionMode === 'lazy' ? 6000 : 1500);
+    if (!ready && injectionMode === 'lazy') {
+      // Never leave the user with a blank layer: re-register the inline bundle
+      // and reload once. This also covers a future Codex build that ignores
+      // Page.setBypassCSP for local HTTP requests.
+      console.warn('[nuvio] lazy runtime did not mount; falling back to inline bundle');
+      try {
+        if (registered?.identifier) {
+          await cdp.send('Page.removeScriptToEvaluateOnNewDocument', {
+            identifier: registered.identifier,
+          });
+        }
+      } catch {
+        /* ignore */
+      }
+      injectionMode = 'full';
+      source = buildSource(controlBase, controlToken, 'full');
+      registered = await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source });
+      if (options.reload) {
+        const loaded = cdp.waitFor('Page.loadEventFired', 20000);
+        await cdp.send('Page.reload', { ignoreCache: true });
+        await loaded.catch(() => {});
+        await sleep(1000);
+      } else {
+        await cdp.send('Runtime.evaluate', { expression: source, returnByValue: true });
+        await sleep(800);
+      }
+      ready = await rootExists(cdp, 4000);
+    }
+    if (!ready) {
       throw new Error('injection ran, but #cxd-bg-root was not created');
     }
 

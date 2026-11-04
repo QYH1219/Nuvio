@@ -2,6 +2,74 @@
 
 All notable changes to this project are documented here.
 
+## [0.5.0] - 2026-11-04
+
+### Added
+
+- Wallpaper Engine `web` wallpapers: the whole project folder is copied into
+  `public/assets/library/<id>/web/` and rendered in a sandboxed, click-through
+  iframe above the WebGL canvas. Single-file HTML wallpapers with inline data
+  URIs work without any transcoding.
+- Cached lazy runtime: the resident injector serves the injection bundle from
+  `/bundle.js` (gzip + ETag + 304) and evaluates a tiny loader, so reloads no
+  longer push the ~800 KB IIFE through CDP every time. `--lazy` / `--full`
+  force a mode; the injector falls back to the inline bundle automatically if
+  the local server is unreachable.
+- `npm run size` reports raw and gzip sizes for the embedded runtime.
+- `npm run sign` optionally signs the release zip with `signtool` when
+  `NUVIO_SIGN_CERT` is configured. It never fabricates a signature.
+- `start.sh` for macOS/Linux preview and injection (experimental). The Windows
+  path is unchanged. The portable build runs the prebuilt bundle directly, so
+  it does not need `npm install` or `node_modules`.
+- `tools/launch-codex.sh` is now shipped with the repository and release zip.
+  It auto-detects common Codex executable names and honors `CODEX_BIN` for a
+  custom install path.
+- Autostart is now exercised by the test checklist: `npm run autostart --
+  status|enable|disable` writes a single login shortcut and never creates a
+  second desktop shortcut.
+- Autostart is also available in the settings panel (系统 → 登录时自动恢复壁纸).
+  The panel and the CLI share `tools/autostart.mjs`, so both write only
+  `Startup\Nuvio.lnk`.
+- Shader preview harness: `shader-preview.html` + `src/shader-preview.js`
+  render a single Wallpaper Engine effect with live uniforms for comparison
+  against the original scene. The private preview fixture is stripped from
+  release bundles.
+- Wallpaper Engine water effects: `waterwaves`, `waterripple` and `waterflow`
+  now run through the same effect graph as the desktop renderer.
+- `sceneWater` config value so water effects can be scaled or disabled from the
+  panel without touching the rest of the scene animation.
+
+### Fixed
+
+- Wallpaper Engine `web` entries were still disabled in the settings panel even
+  though the backend already imported and applied them. The button now works
+  and shows the sandboxed rendering hint.
+- `waterwaves`, `waterripple` and `waterflow` reproduce the WE shader math:
+  masks are sampled in UV space (`maskScale = 1`), effects run in the original
+  `effects` array order, `foliagesway` uses its mask as amplitude, and water UVs
+  are no longer clamped at the entry point.
+- `waterflow` no longer re-runs the whole warp chain on every sample.
+- `foliagesway` now uses the screen aspect ratio instead of the texture aspect.
+- `readActiveManifest()` shadowed `url` inside its `try` block, so the manifest
+  fetch threw a TDZ `ReferenceError` that was swallowed by the `catch`. The
+  active wallpaper manifest was therefore ignored on every startup.
+- Manifest entries are relative to `public/assets`, but they were joined
+  against the server root, producing `/library/...` instead of
+  `/assets/library/...`. Web and library wallpapers now resolve correctly.
+- Web entries no longer get rejected by the SPA-fallback guard that treats
+  `text/html` responses as missing files.
+- Wallpaper mode now removes Codex's 1px header/thread separator layers so the
+  titlebar boundary no longer draws a bright horizontal seam over artwork.
+- `README.md` clone instructions now use the real repository name.
+- Online demo/homepage links point at `https://qyh1219.github.io/Nuvio/`
+  instead of the 404 `QYH1219` project path.
+
+### Changed
+
+- The GLB validator is loaded lazily, so the main injection bundle dropped from
+  about 769 KB to about 633 KB (167 KB gzip), with the model chunk (~138 KB)
+  fetched only when a model actually exists.
+
 ## [0.4.2] - 2026-11-04
 
 ### Fixed

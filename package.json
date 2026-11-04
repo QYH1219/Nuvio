@@ -1,7 +1,7 @@
 {
   "name": "nuvio",
   "private": true,
-  "version": "0.4.2",
+  "version": "0.5.0",
   "description": "Nuvio — a lightweight, DIY animated wallpaper layer for Codex Desktop, with Wallpaper Engine workshop detection.",
   "license": "MIT",
   "author": "QuisVic",
@@ -9,7 +9,7 @@
     "type": "git",
     "url": "git+https://github.com/QYH1219/Nuvio.git"
   },
-  "homepage": "https://qyh1219.github.io/QYH1219/",
+  "homepage": "https://qyh1219.github.io/Nuvio/",
   "bugs": {
     "url": "https://github.com/QYH1219/Nuvio/issues"
   },
@@ -43,6 +43,8 @@
     "restore": "node tools/restore.mjs",
     "bundle": "node tools/bundle.mjs",
     "pack": "node tools/pack.mjs",
+    "sign": "node tools/sign.mjs",
+    "size": "node tools/size.mjs",
     "shortcut": "node tools/shortcut.mjs",
     "autostart": "node tools/autostart.mjs",
     "restart": "node tools/restart.mjs",

@@ -10,9 +10,10 @@
  * web    -> public/wallpaper/
  * scene  -> RePKG unpack, then public/assets/wallpaper/{scene.json,artwork,masks}
  *
- * The scene importer understands the two effect shaders used by most
- * illustrated scene wallpapers: `shake` (flow-map UV shake) and
- * `foliagesway` (UV mode). Other effects are reported and skipped.
+ * The scene importer understands the effect shaders used by most illustrated
+ * scene wallpapers: `shake` (flow-map UV shake), `foliagesway` (UV mode),
+ * `waterwaves`, `waterripple` and `waterflow`. Other effects are reported and
+ * skipped.
  */
 import {
   copyFileSync,
@@ -25,6 +26,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { basename, dirname, extname, join, resolve } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -444,7 +446,15 @@ function importWeb(projectDir, project, options) {
   return { kind: 'web', target, copied: true };
 }
 
-function collectSceneEffects(sceneDir, object) {
+export const SCENE_EFFECTS = new Set([
+  'shake',
+  'foliagesway',
+  'waterwaves',
+  'waterripple',
+  'waterflow',
+]);
+
+export function collectSceneEffects(sceneDir, object) {
   const materialsRoot = join(sceneDir, 'materials');
   const pipeline = [];
   const unsupported = new Set();
@@ -458,20 +468,24 @@ function collectSceneEffects(sceneDir, object) {
       definition = null;
     }
     const type = String(definition?.replacementkey || basename(dirname(effect.file))).toLowerCase();
-    if (type !== 'shake' && type !== 'foliagesway') {
+    if (!SCENE_EFFECTS.has(type)) {
       unsupported.add(type);
       continue;
     }
 
     for (const pass of effect.passes || []) {
       const values = pass.constantshadervalues || {};
-      const maskRef = (pass.textures || []).find((value) => typeof value === 'string' && value.length);
-      const maskPath = findTexture(materialsRoot, maskRef);
+      const textureAt = (index) => {
+        const ref = (pass.textures || [])[index];
+        if (typeof ref !== 'string' || !ref.length) return null;
+        return findTexture(materialsRoot, ref);
+      };
+      const mask = textureAt(1);
 
       if (type === 'shake') {
         pipeline.push({
           type: 'shake',
-          maskSource: maskPath,
+          textures: { mask },
           params: {
             speed: num(values.speed, 1),
             strength: num(values.strength, 0.1),
@@ -479,10 +493,10 @@ function collectSceneEffects(sceneDir, object) {
             friction: pair(values.friction, [1, 1]),
           },
         });
-      } else {
+      } else if (type === 'foliagesway') {
         pipeline.push({
           type: 'foliagesway',
-          maskSource: maskPath,
+          textures: { mask },
           params: {
             speed: num(values.speeduv, 5),
             strength: num(values.strength, 0.4),
@@ -491,6 +505,41 @@ function collectSceneEffects(sceneDir, object) {
             ratio: num(values.ratio, 3.5),
             scale: num(values.scale, 0.05),
             direction: num(values.scrolldirection, 0),
+          },
+        });
+      } else if (type === 'waterwaves') {
+        pipeline.push({
+          type,
+          textures: { mask },
+          params: {
+            direction: num(values.direction, 0),
+            scale: num(values.scale, 200),
+            speed: num(values.speed, 5),
+            strength: num(values.strength, 0.1),
+            perspective: num(values.perspective, 0),
+          },
+        });
+      } else if (type === 'waterripple') {
+        pipeline.push({
+          type,
+          textures: { mask, normal: textureAt(2) },
+          params: {
+            animationspeed: num(values.animationspeed, 0.15),
+            scale: num(values.scale, 1),
+            scrollspeed: num(values.scrollspeed, 0),
+            direction: num(values.scrolldirection, 0),
+            ratio: num(values.ratio, 1),
+            strength: num(values.ripplestrength, 0.1),
+          },
+        });
+      } else if (type === 'waterflow') {
+        pipeline.push({
+          type,
+          textures: { mask, phase: textureAt(2) },
+          params: {
+            speed: num(values.speed, 1),
+            strength: num(values.strength, 1),
+            phasescale: num(values.phasescale, 2),
           },
         });
       }
@@ -529,13 +578,34 @@ function importScene(options, projectDir, project) {
   const { pipeline, unsupported } = collectSceneEffects(sceneRoot, object);
   const outDir = join(options.out, 'wallpaper');
 
-  const normalizedPipeline = pipeline.map((entry, index) => ({
-    type: entry.type,
-    mask: entry.maskSource
-      ? `mask_${entry.type}_${index + 1}${extname(entry.maskSource).toLowerCase()}`
-      : null,
-    params: entry.params,
-  }));
+  // One texture file per unique source path. Water scenes often reuse the same
+  // mask across several passes, so naming by pass index would copy it N times.
+  const textureNames = new Map();
+  const planTexture = (source) => {
+    if (!source) return null;
+    if (textureNames.has(source)) return textureNames.get(source);
+    const stem = basename(source, extname(source))
+      .replace(/[^a-z0-9_-]+/gi, '_')
+      .slice(0, 48);
+    const hash = createHash('sha1').update(source).digest('hex').slice(0, 6);
+    const name = `tex_${stem}_${hash}${extname(source).toLowerCase()}`;
+    textureNames.set(source, name);
+    return name;
+  };
+
+  const normalizedPipeline = pipeline.map((entry) => {
+    const textures = {};
+    for (const key of ['mask', 'normal', 'phase']) {
+      textures[key] = planTexture(entry.textures[key]);
+    }
+    return {
+      type: entry.type,
+      // `mask` is kept for older Nuvio builds that only understood shakes.
+      mask: textures.mask || null,
+      textures,
+      params: entry.params,
+    };
+  });
 
   console.log('[wallpaper] type:    scene');
   console.log('[wallpaper] title:   ' + (project?.title || basename(projectDir || sceneRoot)));
@@ -594,10 +664,7 @@ function importScene(options, projectDir, project) {
     copyFileSync(imagePath, imageTarget);
   }
 
-  for (let index = 0; index < pipeline.length; index += 1) {
-    const source = pipeline[index].maskSource;
-    const name = normalizedPipeline[index].mask;
-    if (!source || !name) continue;
+  for (const [source, name] of textureNames) {
     const target = join(outDir, name);
     if (existsSync(target) && !replaceOutput) continue;
     copyFileSync(source, target);
@@ -638,9 +705,11 @@ function main() {
   }
 }
 
-try {
-  main();
-} catch (error) {
-  console.error(`[wallpaper] ${error.message}`);
-  process.exit(1);
+if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) {
+  try {
+    main();
+  } catch (error) {
+    console.error(`[wallpaper] ${error.message}`);
+    process.exit(1);
+  }
 }

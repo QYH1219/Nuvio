@@ -41,6 +41,7 @@ export class BackgroundEngine {
     this.artworkKind = 'none';
     this.modelEnabled = true;
     this.disposed = false;
+    this.webFrame = null;
 
     this.canvas = document.createElement('canvas');
     this.canvas.className = 'cxd-canvas';
@@ -293,6 +294,41 @@ export class BackgroundEngine {
     this.wake();
   }
 
+  /**
+   * Wallpaper Engine `web` projects are self-contained HTML pages. Rendering
+   * them inside an iframe keeps their CSS/JS fully isolated from Codex, and
+   * pointer-events:none makes the page inert so it never steals clicks.
+   */
+  setBackgroundWeb(url) {
+    this.disposeBackgroundTexture();
+    const frame = document.createElement('iframe');
+    frame.className = 'cxd-web-frame';
+    frame.title = 'Nuvio web wallpaper';
+    frame.setAttribute('aria-hidden', 'true');
+    frame.setAttribute('sandbox', 'allow-scripts allow-same-origin');
+    frame.setAttribute('allowtransparency', 'true');
+    frame.style.cssText = [
+      'position:absolute',
+      'inset:0',
+      'width:100%',
+      'height:100%',
+      'border:0',
+      'margin:0',
+      'padding:0',
+      'pointer-events:none',
+      'background:transparent',
+      'z-index:1',
+    ].join(';');
+    frame.src = url;
+    this.container.appendChild(frame);
+    this.webFrame = frame;
+    // The WebGL canvas would paint over the iframe; hide it while web mode is
+    // active. It is restored by disposeBackgroundTexture().
+    this.canvas.style.visibility = 'hidden';
+    this.artworkKind = 'web';
+    this._needsRepaint = true;
+  }
+
   setFit(fit) {
     this.config.fit = fit;
     this.background.setFit(fit);
@@ -301,6 +337,16 @@ export class BackgroundEngine {
   }
 
   disposeBackgroundTexture() {
+    if (this.webFrame) {
+      try {
+        this.webFrame.removeAttribute('src');
+        this.webFrame.remove();
+      } catch {
+        /* ignore */
+      }
+      this.webFrame = null;
+      this.canvas.style.visibility = '';
+    }
     if (this.backgroundVideo) {
       try {
         this.backgroundVideo.pause();

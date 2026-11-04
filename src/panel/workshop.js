@@ -135,8 +135,8 @@ export function createWorkshopSection(options = {}) {
       action.type = 'button';
       action.className = 'cxd-asset-btn cxd-ws-use';
       action.textContent = entry.active ? '重新应用' : '使用';
-      action.disabled = Boolean(busy) || entry.type === 'web';
-      if (entry.type === 'web') action.title = '网页壁纸暂不支持（0.4 计划）';
+      action.disabled = Boolean(busy);
+      if (entry.type === 'web') action.title = '以沙盒 iframe 渲染网页壁纸';
       action.addEventListener('click', () => use(entry));
 
       const remove = document.createElement('button');

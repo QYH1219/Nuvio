@@ -11,6 +11,10 @@ public/wallpaper/
 public/assets/*
 !public/assets/README.md
 
+# Local shader-preview fixtures (private Wallpaper Engine scene)
+public/__shader-preview__/
+public/__tmp__/
+
 # Local env / editor / OS noise
 .env
 .env.*

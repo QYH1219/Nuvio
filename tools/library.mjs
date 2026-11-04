@@ -13,7 +13,9 @@
 import { spawn } from 'node:child_process';
 import {
   copyFileSync,
+  cpSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
   readdirSync,
@@ -21,7 +23,7 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { dirname, extname, join, resolve, sep } from 'node:path';
+import { dirname, extname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { findEntry, publicEntry, scanWorkshop } from './workshop-scan.mjs';
 
@@ -103,11 +105,27 @@ export function importWorkshopEntry(id, options = {}) {
   // Re-scan so a stale cache cannot smuggle in a removed folder.
   const entry = findEntry(key, { force: false });
   if (!entry) throw new Error('该壁纸不在本机已下载列表中');
-  if (String(entry.type) === 'web') throw new Error('网页壁纸暂不支持（计划 0.4）');
   if (String(entry.type) === 'application') throw new Error('应用类壁纸无法嵌入，请提供预览视频');
 
   const target = entryDir(key);
   if (!target) throw new Error('invalid workshop id');
+
+  // Web wallpapers are self-contained HTML folders. There is nothing to
+  // transcode, so copy the directory and finish synchronously.
+  if (String(entry.type) === 'web') {
+    const job = { state: 'running', message: '正在复制网页壁纸…', startedAt: Date.now() };
+    jobs.set(key, job);
+    try {
+      const meta = importWebEntry(entry, target);
+      job.state = 'done';
+      job.message = '导入完成';
+      job.meta = meta;
+    } catch (error) {
+      job.state = 'error';
+      job.message = error.message;
+    }
+    return job;
+  }
 
   const job = { state: 'running', message: '准备导入…', startedAt: Date.now() };
   jobs.set(key, job);
@@ -206,6 +224,71 @@ function finalizeImport(entry, target) {
     sourceType: entry.type,
     kind,
     entry: relative,
+    preview,
+    importedAt: new Date().toISOString(),
+    generator: 'codex-dynamic-bg/tools/library.mjs',
+  };
+  writeFileSync(join(target, 'meta.json'), `${JSON.stringify(meta, null, 2)}\n`, 'utf8');
+  return meta;
+}
+
+/**
+ * Copy a Wallpaper Engine `web` project into `library/<id>/web/`.
+ *
+ * The entry HTML is usually a single self-contained file with inline data
+ * URIs, but we still copy every sibling asset so relative references keep
+ * working. Paths are validated against the copied folder before the manifest
+ * is written.
+ */
+export function importWebEntry(entry, target) {
+  const source = entry.dir;
+  if (!source || !existsSync(source)) throw new Error('网页壁纸目录不存在');
+  const webDir = join(target, 'web');
+  rmSync(target, { recursive: true, force: true });
+  mkdirSync(webDir, { recursive: true });
+
+  let copied = 0;
+  let bytes = 0;
+  cpSync(source, webDir, {
+    recursive: true,
+    dereference: false,
+    filter: (src) => {
+      try {
+        const stat = lstatSync(src);
+        if (stat.isSymbolicLink()) return false;
+        if (stat.isFile()) {
+          copied += 1;
+          bytes += stat.size;
+          // Refuse pathological workshop folders instead of filling the disk.
+          if (copied > 4000 || bytes > 400 * 1024 * 1024) return false;
+        }
+        return true;
+      } catch {
+        return false;
+      }
+    },
+  });
+
+  const requested = normalize(String(entry.entry || 'index.html')).replace(/^([/\\])+/, '');
+  const candidates = [requested, 'index.html'];
+  let relative = null;
+  for (const name of candidates) {
+    if (!name || name.split(/[/\\]/).includes('..')) continue;
+    const file = join(webDir, name);
+    if (existsSync(file) && statSync(file).isFile()) {
+      relative = name.split('\\').join('/');
+      break;
+    }
+  }
+  if (!relative) throw new Error('网页壁纸缺少入口 HTML');
+
+  const preview = copyPreview(entry, target);
+  const meta = {
+    id: entry.id,
+    title: entry.title,
+    sourceType: 'web',
+    kind: 'web',
+    entry: `library/${entry.id}/web/${relative}`,
     preview,
     importedAt: new Date().toISOString(),
     generator: 'codex-dynamic-bg/tools/library.mjs',

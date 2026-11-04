@@ -22,8 +22,10 @@ Nuvio 是项目的新名字（原代号 Codex Dynamic Background）。改名只�
 ## 特性
 
 - **整窗背景层**：背景渲染在 Codex 窗口最底层，不遮挡交互，不接管鼠标事件。
-- **背景图 / 背景视频 / 场景壁纸**：WebP / PNG / JPG、MP4 / WebM，或 Wallpaper Engine `scene` 壁纸；全屏 shader 采样，带缓慢漂移与视差。
-- **场景效果回放**：自动解包 `scene.pkg`，支持 `shake` 流体抖动和 `foliagesway` 植被摆动的 shader 复刻。
+- **背景图 / 背景视频 / 场景壁纸 / 网页壁纸**：WebP / PNG / JPG、MP4 / WebM、Wallpaper Engine `scene` 壁纸，或直接嵌入 `web` 类型的单文件 HTML 壁纸。
+- **场景效果回放**：自动解包 `scene.pkg`，按 Wallpaper Engine 的顺序复刻
+  `shake`、`foliagesway`、`waterwaves`、`waterripple`、`waterflow`；水波、涟漪和
+  水流共用同一套 UV / 法线管线，不再把整张场景降级成静态图。
 - **Tripo / glTF 模型**：GLB、glTF 直接加载，自动居中、按包围盒缩放，兼容 Draco、Meshopt、KTX2。
 - **动态效果**：模型自转、鼠标倾斜、Bloom 辉光、粒子、暗角、颗粒、点击波纹。
 - **可调参数**：画质档位、动态强度、视差、辉光、颗粒、压暗、模型缩放/位置/自转、面板透明度。
@@ -37,6 +39,7 @@ Nuvio 是项目的新名字（原代号 Codex Dynamic Background）。改名只�
 - **Codex 透明化**：主面板、左右侧栏改为半透明；壁纸模式下关闭 Codex 工作区伪元素遮罩和毛玻璃，设置页仍回退为不透明。
 - **设置持久化**：参数写入 `localStorage`，下次注入自动恢复。
 - **运行时注入**：通过 Chrome DevTools Protocol 注入，不修改 Codex 安装目录里的任何文件；常驻注入器保证刷新后仍然生效。
+- **轻量注入**：常驻注入器用本地 HTTP + gzip + ETag 缓存运行时（约 210 KB 传输），页面刷新只重新执行一个小 loader，不再反复通过 CDP 发送整套 bundle；本地服务不可用时自动回退到内联 bundle。
 - **诊断与恢复**：`npm run doctor` 检查构建、素材、CDP 和注入状态；`npm run restore` 一键撤销背景并清理配置。
 - **无素材可跑**：没有背景图和模型时自动使用程序化背景 + 水晶占位模型。
 - **零后端**：所有资源本地加载，不上传、不联网、无遥测。
@@ -54,7 +57,7 @@ Nuvio 是项目的新名字（原代号 Codex Dynamic Background）。改名只�
 
 ```bash
 git clone https://github.com/QYH1219/Nuvio.git
-cd QYH1219
+cd Nuvio
 npm install
 npm run dev
 ```
@@ -126,6 +129,20 @@ npm run autostart -- disable
 
 快捷键：`G` 开关设置面板，`H` 隐藏/显示 HUD，`Esc` 关闭面板。
 
+#### 场景 shader 预览（开发用）
+
+`shader-preview.html` 是一个不依赖设置面板的调试页，用来单独验证 scene
+效果链。把导出的 private fixture 放到 `public/__shader-preview__/`
+（该目录已 gitignore，构建时也会被剥离），然后访问：
+
+```text
+http://127.0.0.1:5273/shader-preview.html?t=0
+http://127.0.0.1:5273/shader-preview.html?t=4
+```
+
+`t` 固定动画时间，方便对同一帧做像素 diff；没有 fixture 时页面会显示提示，
+不会影响正常预览和注入。
+
 设置面板固定四个分区：
 
 | 分区 | 内容 |
@@ -142,7 +159,7 @@ npm run autostart -- disable
 仓库自带 `.github/workflows/pages.yml`。在 GitHub 仓库的 **Settings → Pages → Build and deployment** 里把 Source 设为 **GitHub Actions**，之后 push 到 `main` 就会自动构建并部署预览站：
 
 ```text
-https://qyh1219.github.io/QYH1219/
+https://qyh1219.github.io/Nuvio/
 ```
 
 在线预览没有你本地的素材，会使用程序化背景和占位水晶模型；它主要用于展示交互和主题，不会暴露 `public/assets/`。
@@ -221,7 +238,7 @@ npm run workshop -- --root "D:\SteamLibrary\steamapps\workshop\content\431960"
 
 创意工坊 API 只在 `npm start` / `npm run inject` 的常驻注入模式下可用，因为扫描和转换跑在本地 Node 进程里；`--once` 或纯预览站没有这个接口。接口只绑定 `127.0.0.1`，并校验注入器生成的临时 token。
 
-`web` 类型暂不支持导入；`application` 是原生程序，只能用它的预览视频重建。
+`web` 类型会整目录复制到 `public/assets/library/<id>/web/`，在沙箱 iframe 里渲染：`pointer-events: none`，不抢点击，也不影响 Codex 的键盘输入。单文件 HTML（内嵌 data URI）最省事；带同级资源的项目也会按相对路径一起复制。`application` 是原生程序，不能嵌入，只能用它的预览视频重建。
 
 ## 从 Wallpaper Engine 复刻
 
@@ -230,8 +247,8 @@ Wallpaper Engine 的壁纸分三类，处理方式不同：
 | `project.json` 的 `type` | 复刻方式 |
 | --- | --- |
 | `video` | 直接导入，作为动态背景播放；可叠加视差、辉光、粒子、模型 |
-| `web` | 先复制到 `public/wallpaper/`，再做一轮兼容处理（属性监听 / audio / 交互） |
-| `scene` | 自动用 RePKG 解开 `scene.pkg`，导出主图和效果 mask；支持 `shake` / `foliagesway` 两类 shader |
+| `web` | 整目录复制后用沙箱 iframe 直接渲染，保留原 HTML/CSS/JS 动画；不支持窗口交互 |
+| `scene` | 自动用 RePKG 解开 `scene.pkg`，导出主图和效果贴图；支持 `shake` / `foliagesway` / `waterwaves` / `waterripple` / `waterflow` |
 | `application` | 原生程序，不能嵌入；用它的预览视频重建 |
 
 找到壁纸目录（Steam 库）：
@@ -265,7 +282,10 @@ npm run wallpaper -- "D:\SteamLibrary\steamapps\workshop\content\431960\38063852
 - 已解包的 scene 目录可直接用 `--scene <目录>` 导入，不需要再次解包。
 - 加 `--force` 覆盖已有输出。
 
-当前场景 shader 复刻支持 `shake` 和 `foliagesway`；其他效果会在导入时列出并跳过，主图仍会作为静态背景加载。素材版权归原作者，`public/assets/*` 默认不提交到仓库。
+当前场景 shader 复刻支持 `shake`、`foliagesway`、`waterwaves`、`waterripple` 和
+`waterflow`；其他效果（`godrays`、`refraction`、`blend`、`xray` 等）会在导入时
+列出并跳过，主图与已支持的效果仍会正常加载。素材版权归原作者，
+`public/assets/*` 默认不提交到仓库。
 
 ## 构建
 
@@ -285,7 +305,12 @@ npm run build:all
 ```bash
 npm run build     # 预览站点
 npm run embed     # 注入 bundle
+npm run size      # 查看运行时 raw / gzip 体积
+npm run sign      # 可选：用 signtool 给便携包签名（需 NUVIO_SIGN_CERT）
 ```
+
+注入 bundle 约 810 KB（gzip 后约 212 KB）。常驻注入器默认走本地 HTTP 缓存，
+浏览器只重新执行一个小 loader；断网或端口被占用时自动回退到内联 bundle。
 
 ## 注入 Codex Desktop
 
@@ -320,6 +345,9 @@ macOS / Linux：
 ```bash
 bash tools/launch-codex.sh
 ```
+
+找不到可执行文件时，用 `CODEX_BIN="/path/to/Codex" bash tools/launch-codex.sh 9222`
+指定路径。便携包解压后用 `bash start.sh` 启动，不需要 `npm install`。
 
 ### 2. 确认 CDP 可用
 
@@ -364,6 +392,8 @@ npm run inject
 --surface NUMBER     面板不透明度 0..1（默认 0.22，越低背景越清晰）
 --dim NUMBER         背景压暗 0..1（默认 0.12）
 --asset-base URL     覆盖素材 base URL
+--lazy               强制使用本地 HTTP 缓存的运行时（默认自动探测）
+--full               强制使用内联 bundle（不依赖本地 HTTP）
 --no-reload          注入到当前文档，不刷新
 --no-serve           不启动本地素材服务器
 --wait SECONDS       等待 CDP 就绪，而不是立即失败（默认 0）
@@ -425,6 +455,7 @@ npm run restore -- --reload     # 清理后刷新页面
 | `modelX` / `modelY` | `0.18` / `-0.02` | 模型屏幕位置偏移 |
 | `sceneShake` | `1` | 场景壁纸抖动强度 |
 | `sceneSway` | `1` | 场景壁纸植被摆动强度 |
+| `sceneWater` | `1` | 场景壁纸水波 / 涟漪 / 水流强度 |
 | `particles` | `true` | 粒子开关 |
 | `codexMock` | `true` | 预览站是否显示 mock 界面 |
 | `surfaceOpacity` | `0.22` | Codex 面板透明度基准（注入时实时生效） |

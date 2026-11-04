@@ -50,6 +50,7 @@ function collect() {
   const files = [
     'package.json',
     'start.cmd',
+    'start.sh',
     'restart.cmd',
     'README.md',
     'README.en.md',
@@ -60,6 +61,7 @@ function collect() {
     'public/assets/README.md',
     'dist-embed/codex-dynamic-bg.iife.js',
     'tools/launch-codex.ps1',
+    'tools/launch-codex.sh',
   ];
   for (const file of walk(join(ROOT, 'tools'))) {
     if (file.endsWith('.mjs')) files.push(relative(ROOT, file).replace(/\\/g, '/'));

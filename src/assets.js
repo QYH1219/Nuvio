@@ -36,13 +36,14 @@ function join(base, path) {
   return base + '/' + path;
 }
 
-async function exists(url) {
+async function exists(url, allowHtml = false) {
   try {
     const res = await fetch(url, { method: 'HEAD', cache: 'no-store' });
     if (!res.ok) return false;
     const type = (res.headers.get('content-type') || '').toLowerCase();
     // Vite/SPA fallbacks answer missing files with index.html; treat that as absent.
-    if (type.includes('text/html')) return false;
+    // A web wallpaper entry, however, is legitimately an HTML document.
+    if (!allowHtml && type.includes('text/html')) return false;
     return true;
   } catch {
     return false;
@@ -50,17 +51,20 @@ async function exists(url) {
 }
 
 async function readActiveManifest(base) {
-  const url = join(base, ACTIVE_MANIFEST);
+  const manifestUrl = join(base, ACTIVE_MANIFEST);
   try {
-    const res = await fetch(url, { cache: 'no-store' });
+    const res = await fetch(manifestUrl, { cache: 'no-store' });
     if (!res.ok) return null;
     const data = await res.json();
     if (!data || typeof data !== 'object' || !data.entry) return null;
     const kind = String(data.kind || '').toLowerCase();
-    if (!['image', 'video', 'scene'].includes(kind)) return null;
-    const url = join(base, String(data.entry));
+    if (!['image', 'video', 'scene', 'web'].includes(kind)) return null;
+    // Manifest entries are relative to `public/assets`, while candidate paths
+    // above already carry the `assets/` prefix. Keep both conventions aligned;
+    // joining `library/...` against the server root would 404.
+    const url = join(base, `assets/${String(data.entry)}`);
     // A stale manifest after a manual delete must fall back to legacy probing.
-    if (!(await exists(url))) return null;
+    if (!(await exists(url, kind === 'web'))) return null;
     return { kind, url, meta: data };
   } catch {
     return null;
@@ -75,6 +79,7 @@ export async function probeAssets() {
     imageUrl: explicit.imageUrl || explicit.background || null,
     modelUrl: explicit.modelUrl || explicit.model || null,
     sceneUrl: explicit.sceneUrl || explicit.scene || null,
+    webUrl: explicit.webUrl || explicit.web || null,
     sceneData: explicit.sceneData || null,
   };
 
@@ -82,12 +87,13 @@ export async function probeAssets() {
   // library manifest. In normal `npm start` runs there is no explicit source,
   // so the wallpaper chosen in the panel is authoritative.
   const hasExplicit = Boolean(explicit.videoUrl || explicit.video || explicit.imageUrl ||
-    explicit.background || explicit.sceneUrl || explicit.scene);
+    explicit.background || explicit.sceneUrl || explicit.scene || explicit.webUrl || explicit.web);
   const active = hasExplicit ? null : await readActiveManifest(base);
   if (active) {
     if (active.kind === 'image' && !result.imageUrl) result.imageUrl = active.url;
     if (active.kind === 'video' && !result.videoUrl) result.videoUrl = active.url;
     if (active.kind === 'scene' && !result.sceneUrl) result.sceneUrl = active.url;
+    if (active.kind === 'web' && !result.webUrl) result.webUrl = active.url;
     result.active = active.meta;
     result.activeKind = active.kind;
   }
@@ -150,8 +156,10 @@ function resolveAsset(name, sceneUrl) {
 
 /**
  * Load a normalized scene wallpaper produced by `tools/wallpaper.mjs`.
- * Only `shake` masks are consumed; foliagesway uses MASK=0 in the source
- * wallpaper, so its mask is decorative metadata.
+ *
+ * Every pipeline entry may reference a mask, a normal map and a phase map.
+ * Images are deduplicated by URL, which matters because water scenes often
+ * reuse one mask across several passes.
  */
 export async function loadSceneWallpaper(url, inlineData = null) {
   const data = inlineData || (await loadSceneJson(url));
@@ -159,32 +167,42 @@ export async function loadSceneWallpaper(url, inlineData = null) {
   const image = await loadImage(imageUrl);
 
   const pipeline = Array.isArray(data.pipeline) ? data.pipeline : [];
-  const shakes = pipeline.filter((entry) => entry && entry.type === 'shake').slice(0, 3);
-  const sway = pipeline.find((entry) => entry && entry.type === 'foliagesway') || null;
-
-  const resolvedShakes = [];
-  for (const entry of shakes) {
-    let maskImage = null;
-    if (entry.mask) {
-      try {
-        maskImage = await loadImage(resolveAsset(entry.mask, url));
-      } catch (error) {
-        console.warn('[codex-bg] shake mask failed', entry.mask, error);
-      }
+  const cache = new Map();
+  const loadRef = async (ref) => {
+    if (!ref) return null;
+    const absolute = resolveAsset(ref, url);
+    if (!cache.has(absolute)) {
+      cache.set(
+        absolute,
+        loadImage(absolute).catch((error) => {
+          console.warn('[codex-bg] scene texture failed', ref, error);
+          return null;
+        }),
+      );
     }
-    resolvedShakes.push({ ...entry, image: maskImage });
+    return cache.get(absolute);
+  };
+
+  const resolved = [];
+  for (const entry of pipeline) {
+    if (!entry || !entry.type) continue;
+    const refs = entry.textures || (entry.mask ? { mask: entry.mask } : {});
+    const [mask, normal, phase] = await Promise.all([
+      loadRef(refs.mask),
+      loadRef(refs.normal),
+      loadRef(refs.phase),
+    ]);
+    resolved.push({
+      type: entry.type,
+      params: entry.params || {},
+      images: { mask, normal, phase },
+    });
   }
 
   return {
     image,
     fit: data.fit || 'cover',
-    pipeline: [
-      ...(sway ? [sway] : []),
-      ...resolvedShakes.map(({ image: maskImage, ...entry }) => ({
-        ...entry,
-        image: maskImage,
-      })),
-    ],
+    pipeline: resolved,
     meta: data.source || {},
     camera: data.camera || {},
   };
