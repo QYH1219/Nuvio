@@ -2,6 +2,36 @@
 
 All notable changes to this project are documented here.
 
+## [0.4.0] - 2026-11-04
+
+### Added
+
+- **Nuvio** brand. The project is now called Nuvio; internal storage keys,
+  wallpaper paths and the config format are unchanged, so existing setups keep
+  working after the upgrade.
+- A single desktop shortcut (`Nuvio.lnk`) that starts Codex when needed,
+  restarts it once if the debugging port is missing, and then injects.
+- Automatic reuse of an already resident injector: launching the shortcut again
+  does not start duplicate asset or control servers.
+- `--force` to replace the resident injector with a fresh one.
+- Real-environment NestWave screenshot in the docs, with the original artwork
+  credited to 小涂真纪-.
+
+### Changed
+
+- `start.cmd` now handles a running Codex without a CDP port by restarting it
+  once instead of failing.
+- The launcher window opens minimized; the taskbar button still shows the log.
+- README shortcut section rewritten around the single shortcut.
+- Log prefix changed from `[cxd]` to `[nuvio]`.
+
+### Fixed
+
+- Repeated shortcut launches no longer start duplicate asset/control servers.
+- Codex PID detection no longer depends on localized `tasklist` filter output.
+- Legacy `Codex 动态背景` shortcuts are removed automatically so the desktop
+  keeps exactly one entry.
+
 ## [0.3.0] - 2026-11-04
 
 ### Added

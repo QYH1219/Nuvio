@@ -16,15 +16,15 @@ let failed = false;
 for (const output of outputs) {
   const found = listPrivateAssets(resolve(root, output));
   if (!found.length) {
-    console.log(`[cxd] ${output}: clean`);
+    console.log(`[nuvio] ${output}: clean`);
     continue;
   }
   if (allow) {
-    console.warn(`[cxd] ${output}: ${found.length} private asset(s) allowed by CXD_ALLOW_PRIVATE_ASSETS=1`);
+    console.warn(`[nuvio] ${output}: ${found.length} private asset(s) allowed by CXD_ALLOW_PRIVATE_ASSETS=1`);
     continue;
   }
   failed = true;
-  console.error(`[cxd] ${output}: private assets must not be published:`);
+  console.error(`[nuvio] ${output}: private assets must not be published:`);
   for (const rel of found) console.error(`  - ${rel}`);
 }
 

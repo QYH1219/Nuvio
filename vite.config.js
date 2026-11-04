@@ -18,7 +18,7 @@ function privateAssetGuard(embed) {
       const removed = stripPrivateAssets(outDir);
       if (removed.length) {
         console.log(
-          `[cxd] stripped ${removed.length} private asset(s) from ${embed ? 'dist-embed' : 'dist'}`,
+          `[nuvio] stripped ${removed.length} private asset(s) from ${embed ? 'dist-embed' : 'dist'}`,
         );
       }
     },

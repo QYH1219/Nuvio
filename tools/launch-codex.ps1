@@ -48,7 +48,7 @@ if (-not $AppPath -or -not (Test-Path -LiteralPath $AppPath)) {
   throw "ChatGPT.exe not found. Pass -AppPath 'C:\path\to\ChatGPT.exe'."
 }
 
-Write-Host "[cxd] app: $AppPath"
+Write-Host "[nuvio] app: $AppPath"
 if ($DryRun) { return }
 
 $existing = Get-CimInstance Win32_Process -Filter "Name = 'ChatGPT.exe'" -ErrorAction SilentlyContinue
@@ -68,6 +68,6 @@ $arguments = @(
   "--remote-allow-origins=*"
 )
 
-Write-Host "[cxd] launching $AppPath"
-Write-Host "[cxd] CDP: http://127.0.0.1:$Port"
+Write-Host "[nuvio] launching $AppPath"
+Write-Host "[nuvio] CDP: http://127.0.0.1:$Port"
 Start-Process -FilePath $AppPath -ArgumentList $arguments

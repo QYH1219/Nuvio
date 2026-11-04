@@ -119,7 +119,7 @@ function parseArgs(argv) {
 
 function printHelp() {
   console.log(`
-Codex Dynamic Background doctor
+Nuvio doctor
 
 Usage:
   npm run doctor -- [--port 9222]
@@ -299,7 +299,7 @@ async function main() {
   }
 
   const icons = { ok: 'OK  ', warn: 'WARN', fail: 'FAIL', info: 'INFO' };
-  console.log('\nCodex Dynamic Background · doctor\n');
+console.log('\nNuvio · doctor\n');
   for (const check of checks) {
     console.log(`[${icons[check.level]}] ${check.label.padEnd(18)} ${check.detail}`);
   }
@@ -316,6 +316,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error(`[cxd] doctor failed: ${error.message}`);
+  console.error(`[nuvio] doctor failed: ${error.message}`);
   process.exitCode = 1;
 });

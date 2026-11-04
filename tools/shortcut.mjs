@@ -23,13 +23,16 @@ function parseArgs(argv) {
   return options;
 }
 
+/** Shortcuts created by earlier versions; removed so the desktop keeps one entry. */
+const LEGACY_NAMES = ['Codex 动态背景.lnk', 'Codex 动态背景 - 仅注入.lnk'];
+
 function psQuote(value) {
   return `'${String(value).replace(/'/g, "''")}'`;
 }
 
 function runPowerShell(script, dryRun) {
   if (dryRun) {
-    console.log('[cxd] dry run, PowerShell script:');
+    console.log('[nuvio] dry run, PowerShell script:');
     console.log(script.trim());
     return;
   }
@@ -41,7 +44,9 @@ function runPowerShell(script, dryRun) {
   if (result.status !== 0) throw new Error(`PowerShell exited with code ${result.status}`);
 }
 
-function shortcutScript({ name, target, description, remove }) {
+function shortcutScript({ name, target, description, remove, cleanup = [] }) {
+  const all = [name, ...cleanup];
+  const list = `@(${all.map(psQuote).join(', ')})`;
   const lines = [
     "$ErrorActionPreference = 'Stop'",
     "$desktop = [Environment]::GetFolderPath('Desktop')",
@@ -49,11 +54,19 @@ function shortcutScript({ name, target, description, remove }) {
   ];
 
   if (remove) {
-    lines.push('if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force }');
-    lines.push('Write-Host "[cxd] removed" $path');
+    lines.push(`foreach ($item in ${list}) {`);
+    lines.push('  $p = Join-Path $desktop $item');
+    lines.push("  if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Force; Write-Host '[nuvio] removed' $p }");
+    lines.push('}');
     return lines.join('\n');
   }
 
+  lines.push(`foreach ($item in ${list}) {`);
+  lines.push('  if ($item -ne ' + psQuote(name) + ') {');
+  lines.push('    $stale = Join-Path $desktop $item');
+  lines.push("    if (Test-Path -LiteralPath $stale) { Remove-Item -LiteralPath $stale -Force; Write-Host '[nuvio] removed legacy' $stale }");
+  lines.push('  }');
+  lines.push('}');
   lines.push('$shell = New-Object -ComObject WScript.Shell');
   lines.push('$link = $shell.CreateShortcut($path)');
   lines.push(`$link.TargetPath = ${psQuote(target)}`);
@@ -61,9 +74,11 @@ function shortcutScript({ name, target, description, remove }) {
   lines.push(`$link.WorkingDirectory = ${psQuote(ROOT)}`);
   lines.push(`$link.Description = ${psQuote(description)}`);
   if (existsSync(ICON)) lines.push(`$link.IconLocation = ${psQuote(`${ICON},0`)}`);
-  lines.push('$link.WindowStyle = 1');
+  // Keep the resident injector out of the way; the user can restore the
+  // console from the taskbar when they need to read the log.
+  lines.push('$link.WindowStyle = 7');
   lines.push('$link.Save()');
-  lines.push('Write-Host "[cxd] shortcut" $path');
+  lines.push('Write-Host "[nuvio] shortcut" $path');
   return lines.join('\n');
 }
 
@@ -73,9 +88,11 @@ function main() {
   }
 
   const options = parseArgs(process.argv.slice(2));
-  const onlyInject = options.onlyInject;
-  const name = options.name || (onlyInject ? 'Codex 动态背景 - 仅注入.lnk' : 'Codex 动态背景.lnk');
-  const target = join(ROOT, onlyInject ? 'start.cmd' : 'restart.cmd');
+  if (options.onlyInject) {
+    console.log('[nuvio] --only-inject is deprecated: start.cmd now injects or restarts by itself');
+  }
+  const name = options.name || 'Nuvio.lnk';
+  const target = join(ROOT, 'start.cmd');
 
   if (!options.remove && !existsSync(target)) {
     throw new Error(`missing ${target}`);
@@ -85,17 +102,18 @@ function main() {
     shortcutScript({
       name,
       target,
-      description: onlyInject ? 'Codex 已带调试端口启动时，仅注入背景' : '重启 Codex 并注入动态壁纸',
+      description: '打开即注入已保存的动态壁纸背景（需要时会自动重启一次 Codex）',
       remove: options.remove,
+      cleanup: LEGACY_NAMES,
     }),
     options.dryRun,
   );
-  console.log(`[cxd] target: ${target}`);
+  console.log(`[nuvio] target: ${target}`);
 }
 
 try {
   main();
 } catch (error) {
-  console.error(`[cxd] ${error.message}`);
+  console.error(`[nuvio] ${error.message}`);
   process.exitCode = 1;
 }

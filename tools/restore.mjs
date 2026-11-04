@@ -36,7 +36,7 @@ function parseArgs(argv) {
 
 function printHelp() {
   console.log(`
-Codex Dynamic Background restore
+Nuvio restore
 
 Usage:
   npm run restore -- [options]
@@ -175,7 +175,7 @@ function selectTarget(targets, filter) {
         .some((value) => value.toLowerCase().includes(needle)),
   );
   if (match) return match;
-  console.warn(`[cxd] target "${filter}" not found; falling back to the first page target`);
+  console.warn(`[nuvio] target "${filter}" not found; falling back to the first page target`);
   return pages[0];
 }
 
@@ -217,13 +217,13 @@ async function requestControlRestore(state, options) {
     const payload = await response.json().catch(() => ({}));
     if (!response.ok || !payload.ok) {
       console.warn(
-        `[cxd] resident injector rejected restore: ${payload.error || `HTTP ${response.status}`}`,
+        `[nuvio] resident injector rejected restore: ${payload.error || `HTTP ${response.status}`}`,
       );
       return null;
     }
     return payload;
   } catch (error) {
-    console.warn(`[cxd] resident injector is not reachable: ${error.message}`);
+    console.warn(`[nuvio] resident injector is not reachable: ${error.message}`);
     return null;
   }
 }
@@ -239,34 +239,34 @@ async function main() {
   const port = options.port ?? state?.port ?? 9222;
   const filter = options.target || state?.targetId || '';
 
-  console.log(`[cxd] restore · CDP port ${port}`);
+  console.log(`[nuvio] restore · CDP port ${port}`);
   if (state) {
     console.log(
-      `[cxd] last injection: ${state.targetTitle || state.targetUrl || state.targetId || 'unknown'} · ${
+      `[nuvio] last injection: ${state.targetTitle || state.targetUrl || state.targetId || 'unknown'} · ${
         state.injectedAt || ''
       }`,
     );
   } else {
-    console.log('[cxd] no .cxd-inject.json; cleaning the current page only');
+    console.log('[nuvio] no .cxd-inject.json; cleaning the current page only');
   }
 
   const daemonAlive = isProcessAlive(state?.pid);
   const residentResult = await requestControlRestore(state, options);
   if (residentResult) {
     console.log(
-      `[cxd] resident injector restored: scriptRemoved=${Boolean(
+      `[nuvio] resident injector restored: scriptRemoved=${Boolean(
         residentResult.scriptRemoved,
       )} reload=${Boolean(residentResult.reload)}`,
     );
     console.log(
-      options.keepConfig ? '[cxd] kept localStorage config' : '[cxd] cleared localStorage config',
+      options.keepConfig ? '[nuvio] kept localStorage config' : '[nuvio] cleared localStorage config',
     );
     try {
       unlinkSync(STATE_FILE);
     } catch {
       /* ignore */
     }
-    console.log('[cxd] restore done. The resident injector has exited.');
+    console.log('[nuvio] restore done. The resident injector has exited.');
     return;
   }
 
@@ -274,14 +274,14 @@ async function main() {
   try {
     targets = await getTargets(port);
   } catch (error) {
-    console.error(`[cxd] cannot reach CDP on 127.0.0.1:${port}: ${error.message}`);
-    console.error('[cxd] quit Codex completely to remove the injection, then start it normally.');
+    console.error(`[nuvio] cannot reach CDP on 127.0.0.1:${port}: ${error.message}`);
+    console.error('[nuvio] quit Codex completely to remove the injection, then start it normally.');
     process.exitCode = 1;
     return;
   }
 
   const target = selectTarget(targets, filter);
-  console.log(`[cxd] target: ${target.title || target.url}`);
+  console.log(`[nuvio] target: ${target.title || target.url}`);
   const cdp = await CdpClient.connect(target.webSocketDebuggerUrl);
   let scriptRemoved = false;
 
@@ -295,13 +295,13 @@ async function main() {
           identifier: state.identifier,
         });
         scriptRemoved = true;
-        console.log(`[cxd] removed scheduled script ${state.identifier}`);
+        console.log(`[nuvio] removed scheduled script ${state.identifier}`);
       } catch (error) {
         if (/not found/i.test(error.message) && !daemonAlive) {
           scriptRemoved = true;
-          console.warn('[cxd] scheduled script was already gone; continuing with page cleanup');
+          console.warn('[nuvio] scheduled script was already gone; continuing with page cleanup');
         } else {
-          console.warn(`[cxd] scheduled script removal failed: ${error.message}`);
+          console.warn(`[nuvio] scheduled script removal failed: ${error.message}`);
         }
       }
     } else {
@@ -314,25 +314,25 @@ async function main() {
     });
     const result = cleanup.result?.value || {};
     console.log(
-      `[cxd] page cleaned: disposed=${Boolean(result.disposed)} roots=${result.roots || 0} styles=${
+      `[nuvio] page cleaned: disposed=${Boolean(result.disposed)} roots=${result.roots || 0} styles=${
         result.styles || 0
       } uiHosts=${result.uiHosts || 0}`,
     );
     console.log(
       options.keepConfig
-        ? '[cxd] kept localStorage config'
-        : '[cxd] cleared localStorage config codex-dynamic-bg:v2',
+        ? '[nuvio] kept localStorage config'
+        : '[nuvio] cleared localStorage config codex-dynamic-bg:v2',
     );
 
     if (options.reload) {
       if (state?.identifier && !scriptRemoved) {
-        console.warn('[cxd] skip reload: scheduled script is still registered; restart Codex first');
+        console.warn('[nuvio] skip reload: scheduled script is still registered; restart Codex first');
       } else {
         const loaded = cdp.waitFor('Page.loadEventFired', 20000);
         await cdp.send('Page.reload', { ignoreCache: true });
         await loaded;
         await sleep(800);
-        console.log('[cxd] page reloaded');
+        console.log('[nuvio] page reloaded');
       }
     }
 
@@ -343,13 +343,13 @@ async function main() {
         /* ignore */
       }
     }
-    console.log('[cxd] restore done. If the layer still appears, restart Codex completely.');
+    console.log('[nuvio] restore done. If the layer still appears, restart Codex completely.');
   } finally {
     cdp.close();
   }
 }
 
 main().catch((error) => {
-  console.error(`[cxd] restore failed: ${error.message}`);
+  console.error(`[nuvio] restore failed: ${error.message}`);
   process.exitCode = 1;
 });

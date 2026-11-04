@@ -59,21 +59,21 @@ async function main() {
   const running = listCodex();
 
   if (options.dryRun) {
-    console.log(`[cxd] dry run · port ${options.port}`);
+    console.log(`[nuvio] dry run · port ${options.port}`);
     console.log(
       running.length
-        ? `[cxd] would stop Codex (${running.map((item) => item.pid).join(', ')}) and relaunch it with CDP`
-        : '[cxd] Codex is not running; would launch it with CDP',
+        ? `[nuvio] would stop Codex (${running.map((item) => item.pid).join(', ')}) and relaunch it with CDP`
+        : '[nuvio] Codex is not running; would launch it with CDP',
     );
-    console.log('[cxd] then inject dist-embed/codex-dynamic-bg.iife.js');
+    console.log('[nuvio] then inject dist-embed/codex-dynamic-bg.iife.js');
     return;
   }
 
   if (running.length) {
-    console.log(`[cxd] Codex is running (${running.length} process(es)).`);
-    console.log('[cxd] Injecting a background layer needs a debugging port, which only exists at launch.');
+    console.log(`[nuvio] Codex is running (${running.length} process(es)).`);
+    console.log('[nuvio] Injecting a background layer needs a debugging port, which only exists at launch.');
     if (!options.yes) {
-      console.log('[cxd] Restarting Codex in 3s. Press Ctrl+C to abort.');
+      console.log('[nuvio] Restarting Codex in 3s. Press Ctrl+C to abort.');
       await sleep(3000);
     }
 
@@ -92,7 +92,7 @@ async function main() {
     if (left.length) {
       throw new Error(`Codex did not exit (pid ${left.map((item) => item.pid).join(', ')}). Close it from the tray and retry.`);
     }
-    console.log('[cxd] Codex stopped.');
+    console.log('[nuvio] Codex stopped.');
   }
 
   const args = [join(ROOT, 'tools', 'start.mjs'), '--port', String(options.port), '--wait', String(options.wait), ...options.forward];
@@ -103,6 +103,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error(`[cxd] ${error.message}`);
+  console.error(`[nuvio] ${error.message}`);
   process.exitCode = 1;
 });

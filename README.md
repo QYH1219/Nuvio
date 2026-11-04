@@ -1,15 +1,21 @@
-# Codex Dynamic Background
+# Nuvio
 
 给 Codex Desktop 注入一层可交互的 WebGL 动态背景：自定义背景图、Tripo 导出的 GLB 模型、鼠标视差、辉光、粒子、模型自转，以及半透明的 Codex 面板。
 
+Nuvio 是项目的新名字（原代号 Codex Dynamic Background）。改名只影响公开品牌，本地存储键、壁纸库目录和配置格式都保持不变，升级不会丢失已经调好的画面。
+
 **中文** | [English](README.en.md)
 
-![Codex Dynamic Background](docs/screenshots/hero.jpg)
+![Nuvio](docs/screenshots/hero.jpg)
 
 ![背景铺满整窗，侧栏与输入框保持半透明](docs/screenshots/workspace.jpg)
 
 > 截图取自项目自带的演示界面（`npm run dev`）：背景是一张程序化生成的抽象图，界面为内置 Codex 模拟面板，**不含任何用户壁纸或聊天内容**。
 > 真实注入后效果一致：背景铺满整窗，侧栏、聊天区与输入框全部半透明，顶部渐变白线已关闭。
+
+![Nuvio 真实环境 · 奶蛙壁纸，完整拉伸铺满不裁剪](docs/screenshots/nestwave.jpg)
+
+> 真实 Codex 环境演示：奶蛙壁纸按 `拉伸铺满` 完整显示，不裁剪。壁纸原图作者：**小涂真纪-**，仅作界面效果演示。
 
 ---
 
@@ -74,19 +80,18 @@ npm start
 
 #### 桌面快捷方式
 
-Codex 已经在跑、又没开调试端口时，`start.cmd` 只能提示你先退出。想要“双击就完事”，用 `restart.cmd`：它会结束当前 Codex、带 `--remote-debugging-port` 重新拉起、再自动注入。
+桌面只保留一个快捷方式，双击就是完整流程：启动器会自己判断 Codex 是否在运行、有没有调试端口；需要时会带 `--remote-debugging-port` 重新拉起一次，然后注入并常驻。壁纸选择和画面参数保存在本地，重启不会把已经调好的画面重置。
 
 ```powershell
-npm run shortcut              # 在桌面创建「Codex 动态背景」→ restart.cmd
-npm run shortcut -- --only-inject   # 再建一个只注入的快捷方式
-npm run shortcut -- --remove        # 删掉主快捷方式
-npm run restart -- --dry-run        # 只看它会做什么，不动进程
+npm run shortcut              # 创建唯一的「Nuvio」快捷方式
+npm run shortcut -- --remove  # 删掉它
+npm run shortcut -- --dry-run # 只看会写入什么，不创建文件
 ```
 
-生成的快捷方式带仓库自带的 `public/icon.ico`，工作目录指向仓库根目录，所以从任何位置双击都能跑。
+生成的快捷方式带仓库自带的 `public/icon.ico`，工作目录指向仓库根目录，所以从任何位置双击都能跑。启动窗口默认最小化，点任务栏图标可以看日志。
 
-- 运行前先完全退出 Codex（包括托盘图标）。已经在运行但没有调试端口的 Codex 无法中途附加，启动器会提示你先退出，不会静默杀掉进程。
-- 需要强制重启 Codex 时再显式执行 `npm run launch:codex -- -KillExisting`。
+- 已经在运行但没有调试端口的 Codex 会被自动重启一次；当前壁纸仍从本地保存的素材和参数恢复。想保留当前窗口、不让启动器重启，用 `npm start -- --no-restart`。
+- 常驻注入器已经在跑时，再次双击快捷方式只会复用现有实例，不会重复起端口；要强制换一个新实例用 `npm start -- --force`。
 - 注入成功后保持启动窗口开着；关闭窗口会停止常驻注入器，下一次刷新就会恢复原样。
 - 只想注入、自己负责启动 Codex：`npm start -- --no-launch`；只重新构建：`npm start -- --build`。
 

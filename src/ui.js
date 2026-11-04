@@ -90,7 +90,7 @@ export function createMock() {
       <div class="mock-user"><span class="mock-avatar">海</span><span>1080p</span></div>
     </aside>
     <main class="mock-main">
-      <div class="mock-top"><span class="mock-crumb">codex-dynamic-bg</span><span class="mock-pill">工作区</span></div>
+            <div class="mock-top"><span class="mock-crumb">nuvio</span><span class="mock-pill">工作区</span></div>
       <div class="mock-thread">
         <div class="mock-msg user"><p>把这个 Tripo 模型做成 Codex 动态背景，要有景深、粒子和鼠标视差。</p></div>
         <div class="mock-msg bot">
@@ -112,7 +112,7 @@ export function createHud() {
   el.innerHTML = `
     <div class="cxd-brand">
       <span class="cxd-mark"></span>
-      <div class="cxd-brand-text"><b>CODEX</b><span>DYNAMIC BACKGROUND</span></div>
+            <div class="cxd-brand-text"><b>NUVIO</b><span>DYNAMIC WALLPAPER</span></div>
     </div>
     <div class="cxd-status">
       <span class="cxd-status-dot"></span>
@@ -154,7 +154,7 @@ export function createPanel(config, handlers = {}, options = {}) {
   titleText.textContent = '背景设置';
   const subtitle = document.createElement('div');
   subtitle.className = 'cxd-panel-sub';
-  subtitle.textContent = options.subtitle || 'Codex Dynamic Background';
+    subtitle.textContent = options.subtitle || 'Nuvio';
   title.append(titleText, subtitle);
   const close = document.createElement('button');
   close.className = 'cxd-icon-btn';
@@ -504,7 +504,7 @@ export function createPanel(config, handlers = {}, options = {}) {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = 'codex-dynamic-bg-config.json';
+    link.download = 'nuvio-config.json';
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     flash('配置已导出');

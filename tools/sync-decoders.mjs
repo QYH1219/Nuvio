@@ -23,7 +23,7 @@ let copied = 0;
 for (const [sourceDir, file] of copies) {
   const source = join(three, sourceDir, file);
   if (!existsSync(source)) {
-    console.warn(`[cxd] missing decoder: ${source}`);
+    console.warn(`[nuvio] missing decoder: ${source}`);
     continue;
   }
   const targetDir = join(root, 'public', 'vendor', sourceDir);
@@ -36,7 +36,7 @@ let licenseCount = 0;
 for (const [sourceRel, targetRel] of licenses) {
   const source = join(root, sourceRel);
   if (!existsSync(source)) {
-    console.warn(`[cxd] missing license: ${source}`);
+    console.warn(`[nuvio] missing license: ${source}`);
     continue;
   }
   const target = join(root, targetRel);
@@ -45,5 +45,5 @@ for (const [sourceRel, targetRel] of licenses) {
   licenseCount += 1;
 }
 
-console.log(`[cxd] local decoders ready (${copied}/${copies.length})`);
-console.log(`[cxd] third-party licenses ready (${licenseCount}/${licenses.length})`);
+console.log(`[nuvio] local decoders ready (${copied}/${copies.length})`);
+console.log(`[nuvio] third-party licenses ready (${licenseCount}/${licenses.length})`);

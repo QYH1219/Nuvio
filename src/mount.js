@@ -727,7 +727,7 @@ export async function mount(host, options = {}) {
     },
     {
       compact: embed,
-      subtitle: embed ? '嵌入模式 · 实时生效' : 'Codex Dynamic Background',
+        subtitle: embed ? '嵌入模式 · 实时生效' : 'Nuvio',
     },
   );
   uiLayer.appendChild(panelRef.panel);

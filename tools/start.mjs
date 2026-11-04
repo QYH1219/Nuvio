@@ -15,6 +15,8 @@ function parseArgs(argv) {
     build: false,
     noBuild: false,
     launch: true,
+    restart: true,
+    force: false,
     forward: [],
   };
 
@@ -34,6 +36,8 @@ function parseArgs(argv) {
     if (arg === '--build') options.build = true;
     else if (arg === '--no-build') options.noBuild = true;
     else if (arg === '--no-launch') options.launch = false;
+    else if (arg === '--no-restart') options.restart = false;
+    else if (arg === '--force') options.force = true;
     else if (arg === '--help' || arg === '-h') options.help = true;
     else {
       // Anything the launcher does not own belongs to tools/inject.mjs. npm already
@@ -48,7 +52,7 @@ function parseArgs(argv) {
 
 function printHelp() {
   console.log(`
-Codex dynamic background · one-command start
+Nuvio · one-command start
 
 Usage:
   npm start -- [options] [injector options]
@@ -59,6 +63,8 @@ Options:
   --build          force a rebuild of the injection bundle
   --no-build       never build; fail if the bundle is missing
   --no-launch      do not launch Codex; expect CDP to already be up
+  --no-restart     fail instead of restarting a Codex that has no CDP port
+  --force          replace a resident injector instead of reusing it
   -h, --help       show this help
 
 Examples:
@@ -118,6 +124,68 @@ function findCodexProcesses() {
   }
 }
 
+function listCodexPids() {
+  if (!IS_WIN) return [];
+  try {
+    const result = spawnSync('tasklist', ['/FO', 'CSV', '/NH'], {
+      encoding: 'utf8',
+      windowsHide: true,
+      maxBuffer: 8 * 1024 * 1024,
+    });
+    return (result.stdout || '')
+      .split(/\r?\n/)
+      .map((line) => line.match(/^"([^"]+)","(\d+)"/))
+      .filter(Boolean)
+      .filter((match) => /^(chatgpt|codex)(\.exe)?$/i.test(match[1]))
+      .map((match) => Number(match[2]));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Codex only accepts a debugging port at launch, so a running instance that
+ * was started normally has to be restarted once. The saved appearance lives in
+ * the renderer localStorage, so restarting does not reset the user's wallpaper.
+ */
+async function stopCodex() {
+  const pids = listCodexPids();
+  for (const pid of pids) {
+    spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], {
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+  }
+  const deadline = Date.now() + 15000;
+  while (Date.now() < deadline && listCodexPids().length) await sleep(300);
+  await sleep(1200);
+  if (listCodexPids().length) {
+    throw new Error('Codex did not exit; close it from the tray and run start again.');
+  }
+}
+
+async function probeInjector() {
+  try {
+    const response = await fetch('http://127.0.0.1:5276/status', {
+      signal: AbortSignal.timeout(800),
+    });
+    if (!response.ok) return null;
+    const status = await response.json();
+    return status && status.ok ? status : null;
+  } catch {
+    return null;
+  }
+}
+
+async function stopInjector(status) {
+  if (!status?.pid) return;
+  spawnSync('taskkill', ['/PID', String(status.pid), '/T', '/F'], {
+    stdio: 'ignore',
+    windowsHide: true,
+  });
+  await sleep(600);
+}
+
 async function probeCdp(port) {
   try {
     const response = await fetch(`http://127.0.0.1:${port}/json/list`, {
@@ -135,7 +203,7 @@ async function waitForCdp(port, seconds) {
   while (Date.now() < deadline) {
     if (await probeCdp(port)) return true;
     if (!announced) {
-      console.log(`[cxd] waiting for CDP on 127.0.0.1:${port} (up to ${seconds}s) ...`);
+      console.log(`[nuvio] waiting for CDP on 127.0.0.1:${port} (up to ${seconds}s) ...`);
       announced = true;
     }
     await sleep(500);
@@ -173,20 +241,38 @@ async function main() {
     throw new Error(`Node.js 22+ is required, found ${process.version}`);
   }
 
-  console.log('[cxd] Codex Dynamic Background');
+  console.log('[nuvio] Codex Dynamic Background');
 
   if (!existsSync(join(ROOT, 'node_modules', 'three'))) {
-    console.log('[cxd] installing dependencies ...');
+    console.log('[nuvio] installing dependencies ...');
     installDependencies();
   }
 
   if (!options.noBuild && (options.build || !existsSync(BUNDLE) || !existsSync(VENDOR_DRACO))) {
-    console.log('[cxd] building the injection bundle ...');
+    console.log('[nuvio] building the injection bundle ...');
     runNpm('embed');
   }
 
   if (!existsSync(BUNDLE)) {
     throw new Error('missing dist-embed bundle; run npm run embed (or drop --no-build)');
+  }
+
+  // A resident injector already keeps the saved layer alive across page
+  // reloads. Double-clicking the desktop shortcut again should be harmless,
+  // not a second asset server and a second control server.
+  const existing = await probeInjector();
+  if (existing && options.force) {
+    console.log(`[nuvio] replacing the running injector (pid ${existing.pid}) ...`);
+    await stopInjector(existing);
+  } else if (existing) {
+    const cdpAlive = await probeCdp(options.port);
+    if (cdpAlive) {
+      console.log(`[nuvio] already running (pid ${existing.pid}); the saved background is active.`);
+      console.log('[nuvio] use --force to reload the injector.');
+      return;
+    }
+    console.log('[nuvio] stale injector detected; restarting it ...');
+    await stopInjector(existing);
   }
 
   let cdpReady = await probeCdp(options.port);
@@ -201,11 +287,15 @@ async function main() {
       cdpReady = await waitForCdp(options.port, Math.min(options.wait, 5));
     }
     if (running.length && !cdpReady) {
-      throw new Error(
-        `Codex is already running (${running.join(', ')}) without a debugging port.\n` +
-          'Quit Codex completely (including the tray icon), then run npm start again.\n' +
-          'If you accept restarting it, run: npm run launch:codex -- -KillExisting',
-      );
+      if (!options.restart) {
+        throw new Error(
+          `Codex is already running (${running.join(', ')}) without a debugging port.\n` +
+            'Quit Codex completely (including the tray icon), then run npm start again.\n' +
+            'If you accept restarting it, run: npm run launch:codex -- -KillExisting',
+        );
+      }
+      console.log('[nuvio] Codex is running without a debugging port; restarting it once ...');
+      await stopCodex();
     }
 
     launchCodex(options.port);
@@ -226,7 +316,7 @@ async function main() {
     '15',
     ...options.forward,
   ];
-  console.log('[cxd] injecting ...');
+  console.log('[nuvio] injecting ...');
 
   const child = spawn(process.execPath, injectArgs, {
     cwd: ROOT,
@@ -234,12 +324,12 @@ async function main() {
   });
 
   child.on('error', (error) => {
-    console.error(`[cxd] ${error.message}`);
+    console.error(`[nuvio] ${error.message}`);
     process.exitCode = 1;
   });
   child.on('exit', (code, signal) => {
     if (signal) {
-      console.log(`[cxd] injector stopped (${signal})`);
+      console.log(`[nuvio] injector stopped (${signal})`);
       process.exitCode = 0;
       return;
     }
@@ -248,6 +338,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error(`[cxd] ${error.message}`);
+  console.error(`[nuvio] ${error.message}`);
   process.exitCode = 1;
 });

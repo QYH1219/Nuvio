@@ -1,8 +1,8 @@
 {
-  "name": "codex-dynamic-bg",
+  "name": "nuvio",
   "private": true,
-  "version": "0.3.0",
-  "description": "A lightweight, DIY animated wallpaper layer for Codex Desktop with Wallpaper Engine workshop detection.",
+  "version": "0.4.0",
+  "description": "Nuvio — a lightweight, DIY animated wallpaper layer for Codex Desktop, with Wallpaper Engine workshop detection.",
   "license": "MIT",
   "author": "QuisVic",
   "repository": {

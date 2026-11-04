@@ -1,15 +1,21 @@
-# Codex Dynamic Background
+# Nuvio
 
 An interactive WebGL background layer for Codex Desktop: custom artwork, Tripo GLB models, mouse parallax, bloom, particles, model rotation, and translucent Codex panels.
 
+Nuvio is the project's new name (formerly Codex Dynamic Background). Only the public brand changed: local storage keys, the wallpaper library and the config format are unchanged, so upgrading keeps your saved scene.
+
 [中文](README.md) | **English**
 
-![Codex Dynamic Background](docs/screenshots/hero.jpg)
+![Nuvio](docs/screenshots/hero.jpg)
 
 ![Backdrop filling the window with translucent sidebar and composer](docs/screenshots/workspace.jpg)
 
 > Captured from the built-in demo surface (`npm run dev`): the backdrop is a procedurally generated abstract image and the UI is the bundled Codex mock panel. **No user artwork or chat content is included.**
 > After injection the real Codex window behaves the same way: the backdrop fills the window, and the sidebar, chat area and composer are all translucent with the top fade overlay disabled.
+
+![Nuvio in a real Codex window with the NestWave wallpaper, stretched to fit without cropping](docs/screenshots/nestwave.jpg)
+
+> Real-environment demo: the NestWave wallpaper is stretched to cover the whole window without cropping. Original artwork by **小涂真纪-**; shown for interface demonstration only.
 
 ---
 
@@ -74,8 +80,9 @@ npm start
 
 The launcher installs missing dependencies, builds the injection bundle, checks CDP, starts Codex with the debugging port when needed, then injects and stays resident.
 
-- Quit Codex completely first, including the tray icon. A running Electron instance cannot open a debugging port retroactively; the launcher tells you to quit instead of silently killing it.
-- Explicit restart when you accept losing the current window: `npm run launch:codex -- -KillExisting`.
+- There is exactly one desktop shortcut. It starts Codex with the debugging port when needed, restarts a running instance that has no port, then injects. The saved wallpaper and appearance survive the restart.
+- `npm run shortcut` creates the single `Nuvio` shortcut; `npm run shortcut -- --remove` deletes it. The launcher window starts minimized; use the taskbar button to read the log.
+- Keep the current window instead of letting the launcher restart it: `npm start -- --no-restart`. Replace an already resident injector: `npm start -- --force`.
 - Keep the launcher window open. Closing it stops the resident injector, so the next reload restores the normal UI.
 - CDP already handled elsewhere: `npm start -- --no-launch`. Force a rebuild: `npm start -- --build`.
 
