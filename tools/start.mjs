@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline/promises';
+import { waitForPageTarget } from './target-score.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const BUNDLE = join(ROOT, 'dist-embed', 'codex-dynamic-bg.iife.js');
@@ -365,6 +366,28 @@ async function waitForCdp(port, seconds) {
   return false;
 }
 
+async function fetchTargets(port) {
+  const response = await fetch(`http://127.0.0.1:${port}/json/list`, {
+    signal: AbortSignal.timeout(1500),
+  });
+  if (!response.ok) throw new Error(`CDP target list failed: HTTP ${response.status}`);
+  return response.json();
+}
+
+/**
+ * Codex briefly reports zero page windows while it restarts. Replacing the
+ * resident injector in that window used to stop a healthy injector and then
+ * fail to start a new one, wiping the user's background. Always confirm a page
+ * window exists before touching the running injector.
+ */
+async function waitForPageWindow(port, seconds) {
+  return waitForPageTarget({
+    getTargets: () => fetchTargets(port),
+    seconds,
+    sleep: (ms) => sleep(ms),
+  });
+}
+
 function launchCodex(port) {
   if (!IS_WIN) {
     const script = join(ROOT, 'tools', 'launch-codex.sh');
@@ -427,6 +450,16 @@ async function main() {
   // not a second asset server and a second control server.
   const existing = await probeInjector();
   if (existing && options.force) {
+    // Never stop a working injector until Codex actually has a page window to
+    // attach to. Otherwise a restart-in-progress turns into "no background".
+    const page = await waitForPageWindow(options.port, Math.min(Math.max(options.wait, 8), 30));
+    if (!page) {
+      console.log(
+        `[nuvio] Codex has no page window right now; keeping the resident injector (pid ${existing.pid}) alive.`,
+      );
+      console.log('[nuvio] it reattaches by itself as soon as the window is back. Nothing was changed.');
+      return;
+    }
     console.log(`[nuvio] replacing the running injector (pid ${existing.pid}) ...`);
     await stopInjector(existing);
   } else if (existing) {
@@ -490,21 +523,28 @@ async function main() {
     '--port',
     String(options.port),
     '--wait',
-    '15',
+    String(Math.max(20, Math.min(options.wait, 60))),
     ...(options.detach && !options.forward.includes('--once') ? ['--daemon'] : []),
     ...options.forward,
   ];
   console.log('[nuvio] injecting ...');
 
   if (options.detach && !options.forward.includes('--once')) {
-    const child = spawn(process.execPath, injectArgs, {
-      cwd: ROOT,
-      detached: true,
-      stdio: 'ignore',
-      windowsHide: true,
-    });
-    child.unref();
-    const status = await waitForInjector(25);
+    let status = null;
+    for (let attempt = 1; attempt <= 2 && !status; attempt += 1) {
+      const child = spawn(process.execPath, injectArgs, {
+        cwd: ROOT,
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: true,
+      });
+      child.unref();
+      status = await waitForInjector(attempt === 1 ? 25 : 20);
+      if (!status && attempt === 1) {
+        console.log('[nuvio] injector did not report ready; retrying once ...');
+        printInjectorLogTail(6);
+      }
+    }
     if (!status) {
       printInjectorLogTail();
       throw new Error(

@@ -2,6 +2,20 @@
 
 All notable changes to this project are documented here.
 
+## [0.5.1] - 2026-11-04
+
+### Fixed
+
+- The resident injector no longer exits when Codex briefly reports zero page
+  targets during a renderer restart. It waits for a real `app://` window and
+  reattaches automatically, so the saved wallpaper survives Codex updates and
+  reloads.
+- `npm start -- --force` refuses to stop a healthy injector while Codex has no
+  page window, preventing a restart race from wiping the background.
+- Injector startup retries once and releases a stale lock after failure.
+- `tools/cdp.mjs` now bounds every CDP request with a timeout and retries
+  screenshots with a lower-cost capture path instead of hanging forever.
+
 ## [0.5.0] - 2026-11-04
 
 ### Added

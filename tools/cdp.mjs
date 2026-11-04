@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import path from 'node:path';
 
 const CDP = process.env.CDP_URL || 'http://127.0.0.1:9222';
 
@@ -18,14 +19,44 @@ function connect(url) {
     const socket = new WebSocket(url);
     const pending = new Map();
     let nextId = 1;
+    const failAll = (reason) => {
+      for (const { rej } of pending.values()) rej(new Error(reason));
+      pending.clear();
+    };
     socket.addEventListener('open', () => {
       resolve({
-        send(method, params = {}) {
+        /**
+         * Every CDP request is bounded. A renderer can stall (minimized window,
+         * GPU reset, relaunch) and an unbounded await left this CLI hanging
+         * forever with no output.
+         */
+        send(method, params = {}, timeoutMs = 20000) {
           const id = nextId++;
           socket.send(JSON.stringify({ id, method, params }));
-          return new Promise((res, rej) => pending.set(id, { res, rej }));
+          return new Promise((res, rej) => {
+            const timer = setTimeout(() => {
+              pending.delete(id);
+              rej(new Error(`CDP timeout after ${timeoutMs}ms: ${method}`));
+            }, timeoutMs);
+            pending.set(id, {
+              res: (value) => {
+                clearTimeout(timer);
+                res(value);
+              },
+              rej: (error) => {
+                clearTimeout(timer);
+                rej(error);
+              },
+            });
+          });
         },
-        close() { socket.close(); }
+        close() {
+          try {
+            socket.close();
+          } catch {
+            /* ignore */
+          }
+        },
       });
     });
     socket.addEventListener('message', (event) => {
@@ -35,6 +66,9 @@ function connect(url) {
       pending.delete(message.id);
       if (message.error) rej(new Error(`${message.error.message} (${JSON.stringify(message.error.data ?? '')})`));
       else res(message.result);
+    });
+    socket.addEventListener('close', () => {
+      failAll('CDP socket closed');
     });
     socket.addEventListener('error', () => reject(new Error('CDP socket error')));
   });
@@ -55,14 +89,28 @@ async function evaluate(client, expression, awaitPromise = true) {
 }
 
 async function screenshot(client, outPath) {
-  const { data } = await client.send('Page.captureScreenshot', {
-    format: 'jpeg',
-    quality: 82,
-    fromSurface: true,
-    captureBeyondViewport: false
-  });
-  fs.writeFileSync(outPath, Buffer.from(data, 'base64'));
-  return outPath;
+  const attempts = [
+    { fromSurface: true, captureBeyondViewport: false },
+    { fromSurface: false, captureBeyondViewport: false },
+    { fromSurface: true, optimization: 'speed' },
+  ];
+  let lastError = null;
+  for (const extra of attempts) {
+    try {
+      const { data } = await client.send(
+        'Page.captureScreenshot',
+        { format: 'jpeg', quality: 82, ...extra },
+        15000,
+      );
+      if (!data) throw new Error('empty screenshot payload');
+      fs.mkdirSync(path.dirname(path.resolve(outPath)), { recursive: true });
+      fs.writeFileSync(outPath, Buffer.from(data, 'base64'));
+      return outPath;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError;
 }
 
 const [command, ...args] = process.argv.slice(2);

@@ -25,7 +25,7 @@ import {
   listWorkshop,
 } from './library.mjs';
 import { getAutostartStatus, setAutostart } from './autostart.mjs';
-import { selectTarget } from './target-score.mjs';
+import { selectTargetOrNull, waitForPageTarget } from './target-score.mjs';
 import { findEntry } from './workshop-scan.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -746,6 +746,34 @@ async function waitForTargets(port, seconds) {
   }
 }
 
+/**
+ * Codex briefly has zero page windows while it restarts or reloads. Treating
+ * that as fatal used to drop the whole resident injector and wipe the user's
+ * background, so wait for a real page instead of throwing on the first poll.
+ */
+async function waitForPageWindow(port, filter, seconds) {
+  const target = await waitForPageTarget({
+    getTargets: () => getTargets(port),
+    filter,
+    seconds,
+    sleep,
+  });
+  if (target) return target;
+
+  let count = 0;
+  try {
+    count = (await getTargets(port)).length;
+  } catch {
+    /* CDP vanished again; the message below still explains the state */
+  }
+  throw new Error(
+    `Codex is reachable on 127.0.0.1:${port} but has no page window yet ` +
+      `(${count} CDP target(s) after ${seconds}s).\n` +
+      'Leave Codex open and retry: npm start -- --no-launch\n' +
+      'A resident injector already running keeps watching and will reattach by itself.',
+  );
+}
+
 function publishedUrl(value) {
   if (!value) return '';
   if (/^(https?:|data:|blob:)/i.test(value)) return value;
@@ -834,7 +862,12 @@ async function main() {
     return;
   }
 
-  let target = selectTarget(targets, options.target);
+  // `targets` may be non-empty but contain only browser windows while Codex
+  // swaps renderers, so wait for a genuine page window instead of dying on a
+  // transient empty page list.
+  const target =
+    selectTargetOrNull(targets, options.target) ||
+    (await waitForPageWindow(options.port, options.target, Math.max(options.wait, 10)));
   console.log(`[nuvio] target: ${target.title || target.url}`);
 
   let assetServer = null;
@@ -1282,6 +1315,9 @@ async function main() {
     process.once('SIGTERM', onSignal);
   } catch (error) {
     closeResources();
+    // A startup failure must not leave a lock owned by this dead pid; the next
+    // launch would otherwise believe an injector is still running.
+    releaseLock();
     if (stateWritten) {
       try {
         unlinkSync(STATE_FILE);
