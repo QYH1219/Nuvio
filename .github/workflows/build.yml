@@ -35,12 +35,10 @@ jobs:
 
       - name: Syntax check tools
         run: |
-          node --check tools/inject.mjs
-          node --check tools/restore.mjs
-          node --check tools/doctor.mjs
-          node --check tools/cleanup-expression.mjs
-          node --check tools/start.mjs
-          node --check tools/sync-decoders.mjs
+          for file in tools/*.mjs; do
+            echo "checking $file"
+            node --check "$file"
+          done
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

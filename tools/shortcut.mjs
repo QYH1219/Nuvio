@@ -105,7 +105,7 @@ function main() {
       name,
       target: useHiddenLauncher ? join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'wscript.exe') : target,
       args: useHiddenLauncher ? `"${LAUNCHER}" --yes` : '',
-      description: '打开即注入已保存的动态壁纸背景（需要时会自动重启一次 Codex）',
+      description: '打开即注入已保存的动态壁纸背景（需要时先正常关闭再重启一次 Codex）',
       remove: options.remove,
       cleanup: LEGACY_NAMES,
     }),

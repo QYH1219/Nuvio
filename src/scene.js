@@ -4,8 +4,8 @@ import { QUALITY, clamp, normalizeQuality } from './config.js';
 import { describeGpu, detectLowEndGpu, readGpuString, resolveFpsCap } from './gpu.js';
 import { getTheme } from './presets.js';
 import {
-  ARTWORK_TEXTURE_EDGE,
   makeImageTexture,
+  screenTextureEdges,
   summarizeTextures,
 } from './texture.js';
 
@@ -86,7 +86,11 @@ export class BackgroundEngine {
     this.camera = new THREE.PerspectiveCamera(36, 16 / 9, 0.1, 120);
     this.camera.position.set(0, 0, 10);
 
-    this.background = new BackgroundLayer(this.scene, this.renderer);
+    // Match the upload budget to the actual panel. 1080p/1440p stay at the
+    // original 4096 cap; 4K, 5K ultrawide and high-DPI screens get a larger
+    // artwork before falling back to the GPU/VRAM guard.
+    this.textureEdges = screenTextureEdges(this.renderer);
+    this.background = new BackgroundLayer(this.scene, this.renderer, this.textureEdges);
 
     // Lazily created.
     this.glow = null;
@@ -329,7 +333,7 @@ export class BackgroundEngine {
       renderer: this.renderer,
       srgb: true,
       flipY: true,
-      maxEdge: ARTWORK_TEXTURE_EDGE,
+      maxEdge: this.textureEdges.artwork,
     });
     this.background.setTexture(texture, img.width / img.height);
     this.backgroundTexture = texture;
@@ -366,7 +370,7 @@ export class BackgroundEngine {
    * them inside an iframe keeps their CSS/JS fully isolated from Codex, and
    * pointer-events:none makes the page inert so it never steals clicks.
    */
-  setBackgroundWeb(url) {
+  setBackgroundWeb(url, options = {}) {
     this.disposeBackgroundTexture();
     const frame = document.createElement('iframe');
     frame.className = 'cxd-web-frame';
@@ -382,7 +386,7 @@ export class BackgroundEngine {
       'border:0',
       'margin:0',
       'padding:0',
-      'pointer-events:none',
+      `pointer-events:${options.interactive ? 'auto' : 'none'}`,
       'background:transparent',
       'z-index:1',
     ].join(';');
@@ -521,6 +525,9 @@ export class BackgroundEngine {
       this.glow.position.x = config.modelX * 2.2;
     }
     if (this.background.mode === 'scene') this.background.setFit(config.fit);
+    if (this.artworkKind === 'web' && this.webFrame) {
+      this.webFrame.style.pointerEvents = config.webInteractive ? 'auto' : 'none';
+    }
     this.applyTheme(config.theme);
     this._needsRepaint = true;
     this.wake();
@@ -753,6 +760,7 @@ export class BackgroundEngine {
       fps: this.fps,
       tier: normalizeQuality(this.config.quality),
       fpsCap: this.fpsCap || this.quality.fps || 60,
+      textureEdges: this.textureEdges,
       gpu: this.gpu,
       gpuLowEnd: this.gpuLowEnd,
       sceneMissingTextures: missingTextures.map((entry) => `${entry.role} · ${entry.name}`),

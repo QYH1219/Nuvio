@@ -4,6 +4,7 @@ import {
   ARTWORK_TEXTURE_EDGE,
   EFFECT_TEXTURE_EDGE,
   fitWithin,
+  resolveTextureEdges,
   summarizeTextures,
   textureInfo,
 } from '../src/texture.js';
@@ -35,6 +36,44 @@ test('effect textures get a smaller budget than artwork', () => {
   const fit = fitWithin(4096, 2048, EFFECT_TEXTURE_EDGE);
   assert.equal(Math.max(fit.width, fit.height), EFFECT_TEXTURE_EDGE);
   assert.equal(fit.height, 1024);
+});
+
+test('texture budget follows high-DPI and ultrawide screens without unbounded VRAM', () => {
+  const hd = resolveTextureEdges({
+    screenWidth: 1920,
+    screenHeight: 1080,
+    dpr: 1,
+    gpuMaxTextureSize: 16384,
+  });
+  assert.equal(hd.artwork, 4096);
+  assert.equal(hd.effect, 2048);
+
+  const ultrawide = resolveTextureEdges({
+    screenWidth: 5120,
+    screenHeight: 1440,
+    dpr: 1,
+    gpuMaxTextureSize: 16384,
+  });
+  assert.equal(ultrawide.artwork, 5888);
+  assert.equal(ultrawide.effect, 2944);
+
+  const hidpi4k = resolveTextureEdges({
+    screenWidth: 3840,
+    screenHeight: 2160,
+    dpr: 1.5,
+    gpuMaxTextureSize: 16384,
+  });
+  assert.equal(hidpi4k.artwork, 6144);
+  assert.equal(hidpi4k.effect, 3072);
+
+  const weakGpu = resolveTextureEdges({
+    screenWidth: 7680,
+    screenHeight: 4320,
+    dpr: 2,
+    gpuMaxTextureSize: 4096,
+  });
+  assert.equal(weakGpu.artwork, 4096);
+  assert.equal(weakGpu.effect, 2048);
 });
 
 test('textureInfo reports upload size and byte cost', () => {

@@ -59,6 +59,12 @@ const SECTIONS = [
           ['stretch', '拉伸铺满'],
         ],
       },
+      {
+        type: 'toggle',
+        key: 'webInteractive',
+        label: '允许网页壁纸交互（可能挡住点击）',
+        when: 'web',
+      },
       { type: 'range', key: 'surfaceOpacity', label: '界面磨砂强度', min: 0, max: 1, step: 0.01 },
       { type: 'range', key: 'dim', label: '背景压暗', min: 0, max: 0.8, step: 0.01 },
       { type: 'range', key: 'vignette', label: '暗角', min: 0, max: 1, step: 0.01 },
@@ -80,6 +86,12 @@ const SECTIONS = [
       { type: 'toggle', key: 'pauseWhenUnfocused', label: '窗口失焦时暂停' },
       { type: 'range', key: 'motion', label: '动态强度', min: 0, max: 2, step: 0.01 },
       { type: 'range', key: 'parallax', label: '鼠标视差', min: 0, max: 2, step: 0.01 },
+      {
+        type: 'action',
+        key: 'restoreQuality',
+        label: '恢复自动降档前的画质',
+      },
+      { type: 'toggle', key: 'showAdvanced', label: '显示高级设置（动效 / 诊断）' },
     ],
   },
   {
@@ -208,6 +220,7 @@ export function createPanel(config, handlers = {}, options = {}) {
 
   const refs = {};
   const gates = [];
+  const sectionEls = {};
   let refreshAssets = () => {};
   let workshop = null;
 
@@ -221,6 +234,8 @@ export function createPanel(config, handlers = {}, options = {}) {
     const wrap = document.createElement('section');
     wrap.className = 'cxd-section';
     wrap.dataset.section = section.id;
+    wrap.hidden = section.id === 'advanced' && !config.showAdvanced;
+    sectionEls[section.id] = wrap;
     // Sections collapse so the long "高级" block no longer pushes 系统 out of
     // reach. State is per session and starts collapsed for the block most
     // users never touch.
@@ -336,6 +351,30 @@ export function createPanel(config, handlers = {}, options = {}) {
 
       if (control.type === 'diagnostics') {
         sectionBody.appendChild(buildDiagnostics());
+        return;
+      }
+
+      if (control.type === 'action') {
+        const row = document.createElement('div');
+        row.className = 'cxd-row cxd-row-action';
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'cxd-text-btn cxd-restore-btn';
+        btn.textContent = control.label;
+        btn.hidden = true;
+        btn.addEventListener('click', () => {
+          if (control.key !== 'restoreQuality') return;
+          const from = config.autoQualityFrom;
+          if (!QUALITY[from]) return;
+          config.quality = from;
+          config.autoQualityFrom = '';
+          sync();
+          onChange(config);
+          flash(`已恢复到「${QUALITY[from].label}」`);
+        });
+        row.appendChild(btn);
+        sectionBody.appendChild(row);
+        refs[control.key] = { type: 'action', el: btn, label: control.label };
         return;
       }
 
@@ -585,6 +624,7 @@ export function createPanel(config, handlers = {}, options = {}) {
       ['scene', '背景类型'],
       ['gpu', 'GPU'],
       ['cap', '帧率上限'],
+      ['compat', '界面兼容'],
       ['warn', '缺失贴图'],
     ].forEach(([key, label]) => {
       const name = document.createElement('span');
@@ -749,6 +789,7 @@ export function createPanel(config, handlers = {}, options = {}) {
     const kind = summary.kind || (summary.backgroundArtwork ? 'image' : 'placeholder');
     const state = {
       scene: kind === 'scene',
+      web: kind === 'web',
       artwork: Boolean(summary.backgroundArtwork),
       procedural: !summary.backgroundArtwork,
       model: summary.model === 'glb',
@@ -899,11 +940,18 @@ export function createPanel(config, handlers = {}, options = {}) {
         }
       } else if (ref.type === 'toggle') {
         ref.el.checked = Boolean(config[key]);
+      } else if (ref.type === 'action') {
+        const from = config.autoQualityFrom;
+        ref.el.hidden = !QUALITY[from];
+        ref.el.textContent = QUALITY[from]
+          ? `恢复画质（回到「${QUALITY[from].label}」）`
+          : ref.label;
       } else {
         ref.el.value = config[key];
         ref.value.textContent = fmt(config[key], ref.step);
       }
     });
+    if (sectionEls.advanced) sectionEls.advanced.hidden = !config.showAdvanced;
   }
 
   function formatBytes(bytes) {
@@ -930,6 +978,17 @@ export function createPanel(config, handlers = {}, options = {}) {
     if (ref.rows.cap) {
       ref.rows.cap.textContent =
         `${stats.fpsCap || stats.fps || 0} FPS${stats.gpuLowEnd ? ' · 低端 GPU' : ''}`;
+    }
+    if (ref.rows.compat) {
+      const compat = stats.compat || {};
+      const missing = Array.isArray(compat.missing) ? compat.missing : [];
+      ref.rows.compat.textContent =
+        compat.status === 'ok'
+          ? '正常'
+          : compat.status === 'partial'
+            ? `部分缺失（${missing.join('、')}）`
+            : '未检测';
+      ref.rows.compat.classList.toggle('is-warn', compat.status === 'partial');
     }
     if (ref.rows.warn) {
       const missing = Array.isArray(stats.sceneMissingTextures) ? stats.sceneMissingTextures : [];

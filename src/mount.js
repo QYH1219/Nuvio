@@ -39,6 +39,7 @@ import {
 } from './presets.js';
 import { createHud, createHints, createPanel, createMock } from './ui.js';
 import { nextRotationEntry } from './rotation.js';
+import { installCompatProbe } from './compat.js';
 
 const params = new URLSearchParams(location.search);
 
@@ -170,6 +171,7 @@ export async function mount(host, options = {}) {
 
   let disposed = false;
   let engine = null;
+  let compatState = { status: 'unknown', matched: 0, total: 0, missing: [] };
   try {
     engine = new BackgroundEngine(root, config);
   } catch (error) {
@@ -474,7 +476,7 @@ export async function mount(host, options = {}) {
 
     if (assets.background !== 'video' && assets.background !== 'scene' && probed.webUrl) {
       try {
-        engine.setBackgroundWeb(probed.webUrl);
+        engine.setBackgroundWeb(probed.webUrl, { interactive: Boolean(config.webInteractive) });
         assets.background = 'web';
       } catch (error) {
         console.warn('[codex-bg] web wallpaper failed, trying next source', error);
@@ -777,8 +779,12 @@ export async function mount(host, options = {}) {
 
   engine.setConfig(config);
   let lastQuality = normalizeQuality(config.quality);
+  let autoChangingQuality = false;
   const governor = new PerfGovernor({
-    onDowngrade: (tier) => {
+    onDowngrade: (tier, info = {}) => {
+      const from = normalizeQuality(info.from || config.quality);
+      if (QUALITY[from] && from !== tier) config.autoQualityFrom = from;
+      autoChangingQuality = true;
       config.quality = tier;
       lastQuality = tier;
       engine.setConfig(config);
@@ -786,6 +792,7 @@ export async function mount(host, options = {}) {
       panelRef?.sync();
       updateTierLabel();
       setStatus(`性能不足，已自动降到「${qualityFor(tier).label}」`);
+      autoChangingQuality = false;
     },
   });
 
@@ -803,6 +810,7 @@ export async function mount(host, options = {}) {
         ...engine.stats(),
         fps,
         autoDowngraded: governor.applied,
+        compat: compatState,
       };
       window.__CXD_STATS__ = stats;
       panelRef?.updateStats?.(stats);
@@ -820,6 +828,7 @@ export async function mount(host, options = {}) {
         if (tier !== lastQuality) {
           lastQuality = tier;
           governor.reset();
+          if (!autoChangingQuality) config.autoQualityFrom = '';
         }
         engine.setConfig(config);
         engine.setFit(config.fit);
@@ -1064,10 +1073,15 @@ export async function mount(host, options = {}) {
 
   window.cxdBg = api;
   window.dispatchEvent(new CustomEvent('cxdbg-ready', { detail: api }));
+  const compatProbe = installCompatProbe(document, (state) => {
+    compatState = state;
+    window.__CXD_COMPAT__ = state;
+  });
 
   function dispose() {
     if (disposed) return;
     disposed = true;
+    compatProbe?.stop();
     clearRotation();
     window.removeEventListener('keydown', onKeyDown, true);
     try {

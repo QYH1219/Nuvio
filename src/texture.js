@@ -9,6 +9,61 @@ import * as THREE from 'three';
  */
 export const ARTWORK_TEXTURE_EDGE = 4096;
 export const EFFECT_TEXTURE_EDGE = 2048;
+/** Upper bounds keep an 8K source from eating the whole VRAM budget. */
+export const MAX_ARTWORK_TEXTURE_EDGE = 6144;
+export const MAX_EFFECT_TEXTURE_EDGE = 3072;
+
+/**
+ * Pick a texture budget from the actual screen, not from a hardcoded 4K cap.
+ * A 5120px ultrawide or a 4K panel at 150% scaling gets a 5–6K artwork while
+ * ordinary 1080p/1440p desktops stay on the original 4096 budget.
+ *
+ * Pure and renderer-optional so the sizing policy can be unit tested.
+ */
+export function resolveTextureEdges({
+  renderer = null,
+  screenWidth = 0,
+  screenHeight = 0,
+  dpr = 1,
+  gpuMaxTextureSize = 0,
+} = {}) {
+  const gpuMax = Math.max(
+    2048,
+    Number(gpuMaxTextureSize) ||
+      Number(renderer?.capabilities?.maxTextureSize) ||
+      8192,
+  );
+  const screenEdge =
+    Math.max(Number(screenWidth) || 0, Number(screenHeight) || 0) *
+    Math.max(1, Number(dpr) || 1);
+  const wanted = Math.ceil(screenEdge * 1.15);
+  const artwork = Math.min(
+    gpuMax,
+    Math.max(
+      ARTWORK_TEXTURE_EDGE,
+      Math.min(MAX_ARTWORK_TEXTURE_EDGE, wanted || ARTWORK_TEXTURE_EDGE),
+    ),
+  );
+  const effect = Math.min(
+    gpuMax,
+    Math.max(
+      EFFECT_TEXTURE_EDGE,
+      Math.min(MAX_EFFECT_TEXTURE_EDGE, Math.round(artwork / 2)),
+    ),
+  );
+  return { artwork, effect, gpuMax, screenEdge, wanted };
+}
+
+export function screenTextureEdges(renderer) {
+  const screen =
+    typeof window !== 'undefined' && window.screen ? window.screen : {};
+  return resolveTextureEdges({
+    renderer,
+    screenWidth: screen.width,
+    screenHeight: screen.height,
+    dpr: typeof window !== 'undefined' ? window.devicePixelRatio : 1,
+  });
+}
 
 export function sourceSize(source) {
   if (!source) return { width: 1, height: 1 };

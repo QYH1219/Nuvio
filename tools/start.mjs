@@ -186,7 +186,20 @@ async function stopCodex() {
     );
   }
   const pids = listCodexPids();
+  // Ask Electron to close normally first. Force-killing the tree can discard
+  // an in-flight renderer write; the forced pass below is only the fallback
+  // when Codex stays alive in the tray or ignores WM_CLOSE.
   for (const pid of pids) {
+    spawnSync('taskkill', ['/PID', String(pid), '/T'], {
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+  }
+  const gracefulDeadline = Date.now() + 6000;
+  while (Date.now() < gracefulDeadline && listCodexPids().length) await sleep(250);
+
+  const remaining = listCodexPids();
+  for (const pid of remaining) {
     killTree(pid);
   }
   const deadline = Date.now() + 15000;

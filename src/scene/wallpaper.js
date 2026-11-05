@@ -99,7 +99,9 @@ const SUPPORTED = new Set(['shake', 'foliagesway', 'waterwaves', 'waterripple', 
  * only those passes. Texture slots are deduplicated and capped for WebGL2.
  */
 export class SceneWallpaperMaterial extends THREE.ShaderMaterial {
-  constructor(data, renderer) {
+  constructor(data, renderer, textureEdges = {}) {
+    const artworkEdge = Number(textureEdges.artwork) || ARTWORK_TEXTURE_EDGE;
+    const effectEdge = Number(textureEdges.effect) || EFFECT_TEXTURE_EDGE;
     const pipeline = Array.isArray(data.pipeline) ? data.pipeline : [];
     const image = data.image;
     if (!image) throw new Error('scene wallpaper: missing image');
@@ -111,7 +113,7 @@ export class SceneWallpaperMaterial extends THREE.ShaderMaterial {
     const skippedEffects = [];
 
     const uniforms = {
-      uTex: { value: makeTexture(image, true, renderer, false, ARTWORK_TEXTURE_EDGE) },
+      uTex: { value: makeTexture(image, true, renderer, false, artworkEdge) },
       uTime: { value: 0 },
       uParallax: { value: 1 },
       uDim: { value: 0.2 },
@@ -143,7 +145,7 @@ export class SceneWallpaperMaterial extends THREE.ShaderMaterial {
         skippedEffects.push({ type: 'texture-budget', reason: 'texture-budget' });
         return null;
       }
-      const texture = makeTexture(source, srgb, renderer, repeat, EFFECT_TEXTURE_EDGE);
+      const texture = makeTexture(source, srgb, renderer, repeat, effectEdge);
       modes.set(key, texture);
       created.push(texture);
       return texture;

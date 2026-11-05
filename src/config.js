@@ -61,6 +61,9 @@ export const DEFAULTS = {
   wallpaperMode: false,
   quality: 'saver',
   autoQuality: true,
+  // Set by the auto governor when it lowers the tier. The panel uses it to
+  // offer a one-click restore without forcing the user to restart Codex.
+  autoQualityFrom: '',
   lowEndAuto: true,
   idlePause: true,
   pauseWhenUnfocused: true,
@@ -82,6 +85,8 @@ export const DEFAULTS = {
   sceneSway: 1,
   sceneWater: 1,
   particles: true,
+  webInteractive: false,
+  showAdvanced: false,
   codexMock: true,
   surfaceOpacity: 0.22,
   showPanel: false,
@@ -94,6 +99,9 @@ export function loadConfig() {
     const parsed = JSON.parse(raw);
     const merged = { ...DEFAULTS, ...(parsed && typeof parsed === 'object' ? parsed : {}) };
     merged.quality = normalizeQuality(merged.quality);
+    merged.autoQualityFrom = QUALITY[merged.autoQualityFrom] ? merged.autoQualityFrom : '';
+    merged.showAdvanced = Boolean(merged.showAdvanced);
+    merged.webInteractive = Boolean(merged.webInteractive);
     if (!FIT_IDS.includes(merged.fit)) merged.fit = DEFAULTS.fit;
     const rotation = Number(merged.rotationMinutes);
     merged.rotationMinutes = Number.isFinite(rotation)

@@ -4,9 +4,9 @@
  * entries are eligible and what comes next.
  */
 
-const ROTATABLE_KINDS = new Set(['video', 'scene', 'image']);
+const ROTATABLE_KINDS = new Set(['video', 'scene', 'image', 'web']);
 
-/** Imported video/scene/image wallpapers; favorites narrow the pool. */
+/** Imported video/scene/image/web wallpapers; favorites narrow the pool. */
 export function rotationPool(entries, favoriteIds = []) {
   const usable = (Array.isArray(entries) ? entries : []).filter((entry) => {
     if (!entry || !entry.imported) return false;

@@ -121,6 +121,20 @@ html[data-cxd-wallpaper="on"] body aside[data-app-shell-focus-area="left-panel"]
   background-image: none !important;
 }
 
+/* Compatibility fallback for builds that keep the stable data-testid prefix
+   but rename the component class. These three surfaces are the ones that
+   historically produced the white sidebar / white composer / white seam. */
+html[data-cxd-wallpaper="on"] body :is(
+  [data-testid*="left-panel"],
+  [data-testid*="main-surface"],
+  [data-testid*="composer"]
+) {
+  background-color: transparent !important;
+  background-image: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
 html[data-cxd-wallpaper="on"] body :is(
   aside.app-shell-left-panel,
   aside[data-testid="app-shell-floating-left-panel"]

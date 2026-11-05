@@ -20,6 +20,36 @@ All notable changes to this project are documented here.
 ### Changed
 
 - `restart.mjs` starts the replacement process with `windowsHide` as well.
+- CI now runs `node --check` against every `tools/*.mjs` instead of a
+  hand-maintained subset, so `shortcut.mjs`, `autostart.mjs`, `restart.mjs`
+  and `pack.mjs` can no longer rot silently.
+- Hidden-launch logging is now bounded. `start.cmd` rotates
+  `%TEMP%\nuvio-launch.log` to `nuvio-launch.log.1` once it exceeds 256 KiB,
+  so repeated launches cannot grow the log without limit.
+- Codex surface detection is now compatibility-probed instead of assumed.
+  `src/compat.js` checks the main surface, sidebar and composer against
+  several selector generations, reports `ok` / `partial` / `unknown`, and the
+  diagnostics panel shows which surface is missing. Transparent fallback
+  rules also cover `data-testid` variants (`left-panel`, `main-surface`,
+  `composer`).
+- Automatic quality downgrades are now reversible. The perf governor records
+  the pre-downgrade tier in `autoQualityFrom`, and the performance panel shows
+  a "restore pre-downgrade quality" button that only appears while an
+  automatic downgrade is active.
+- Shortcut restarts shut Codex down gracefully: `taskkill /PID <pid> /T`
+  without `/F` is tried first, then force-kill only after a 6 s grace period.
+- Advanced settings are hidden by default (`showAdvanced: false`) and can be
+  revealed from the performance panel, so the default UI stays simple.
+- Texture budgets now scale with the actual screen instead of a fixed
+  4096/2048 cap: 1080p/1440p stay at 4096/2048, ultrawide and 4K HiDPI scale
+  up to 6144/3072, and weak GPUs remain clamped by `maxTextureSize`.
+- Web wallpapers can be interactive (opt-in, off by default) and are now part
+  of the rotation pool.
+
+### Added
+
+- `test/compat.test.mjs`, `test/launcher.test.mjs` and `test/texture.test.mjs`
+  cover the compatibility probe, hidden launcher and adaptive texture budgets.
 
 ## [0.6.1] - 2026-11-04
 

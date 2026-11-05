@@ -11,7 +11,7 @@ const scene = (id, extra = {}) => ({
   ...extra,
 });
 
-test('rotationPool keeps imported video/scene/image wallpapers only', () => {
+test('rotationPool keeps imported video/scene/image/web wallpapers only', () => {
   const entries = [
     scene(1001),
     scene(1002, { kind: 'video' }),
@@ -24,7 +24,7 @@ test('rotationPool keeps imported video/scene/image wallpapers only', () => {
   ];
   assert.deepEqual(
     rotationPool(entries).map((entry) => entry.id),
-    ['1001', '1002', '1003', '1006'],
+    ['1001', '1002', '1003', '1004', '1006'],
   );
 });
 
