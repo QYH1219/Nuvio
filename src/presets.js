@@ -135,3 +135,33 @@ export function applyWallpaperLook(config) {
   });
   return config;
 }
+
+function rgba(hex, alpha) {
+  const value = String(hex || '').replace('#', '');
+  const full = value.length === 3
+    ? value.split('').map((char) => char + char).join('')
+    : value.padEnd(6, '0').slice(0, 6);
+  const int = Number.parseInt(full, 16);
+  if (!Number.isFinite(int)) return `rgba(20, 40, 48, ${alpha})`;
+  return `rgba(${(int >> 16) & 255}, ${(int >> 8) & 255}, ${int & 255}, ${alpha})`;
+}
+
+/**
+ * The colour that sits *behind* the WebGL canvas.
+ *
+ * Codex's own surfaces are forced transparent while Nuvio is active, so an
+ * empty, hidden or context-lost canvas would otherwise composite as a pure
+ * black page. This backdrop is always painted on the layer root: the artwork
+ * covers it during normal rendering, and it becomes the visible fallback the
+ * moment the GPU drops the context.
+ */
+export function themeBackdrop(theme) {
+  const palette = theme?.palette || {};
+  const glowA = palette.glowA || '#1b6f78';
+  const glowB = palette.glowB || '#4b3f9e';
+  return [
+    `radial-gradient(72% 72% at 68% 62%, ${rgba(glowA, 0.32)}, transparent 72%)`,
+    `radial-gradient(62% 62% at 16% 14%, ${rgba(glowB, 0.26)}, transparent 70%)`,
+    'linear-gradient(160deg, #0b131a 0%, #070c11 55%, #05090d 100%)',
+  ].join(', ');
+}

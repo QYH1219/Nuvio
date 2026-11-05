@@ -2,6 +2,25 @@
 
 All notable changes to this project are documented here.
 
+## [0.6.3] - 2026-11-05
+
+### Fixed
+
+- No entry point can leave a Windows Terminal window behind any more.
+  `start.cmd` now re-launches itself through `launch-hidden.vbs` whenever
+  `NUVIO_HIDDEN` is missing, so a stale shortcut, an Explorer double-click or
+  a taskbar pin behaves exactly like the packaged shortcut. `start.cmd
+  --console` keeps the old visible behaviour for debugging.
+- A lost WebGL context no longer turns the whole Codex window black. The
+  renderer now uses an alpha-capable drawing buffer, hides the canvas while
+  the context is gone, and retries `forceContextRestore()` three times over
+  six seconds.
+- The Nuvio layer always paints a themed CSS backdrop under the canvas.
+  Because Codex surfaces are forced transparent while Nuvio is active, a blank
+  canvas (context lost, first frame not painted, wallpaper still decoding)
+  used to composite as a solid black page. The backdrop also follows theme
+  changes, so it never clashes with the selected palette.
+
 ## [0.6.2] - 2026-11-05
 
 ### Fixed

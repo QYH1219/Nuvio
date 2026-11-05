@@ -23,3 +23,14 @@ test('hidden launch log is bounded instead of growing forever', () => {
   assert.match(cmd, /move \/Y "%NUVIO_LOG%" "%NUVIO_LOG%\.1"/);
   assert.match(cmd, />>"%NUVIO_LOG%"/);
 });
+
+test('start.cmd re-launches itself hidden from any entry point', () => {
+  const cmd = readFileSync(join(ROOT, 'start.cmd'), 'utf8');
+  // A stale shortcut, Explorer double-click or taskbar pin must never leave a
+  // Windows Terminal window behind.
+  assert.match(cmd, /if not defined NUVIO_HIDDEN \(/);
+  assert.match(cmd, /wscript\.exe "%~dp0launch-hidden\.vbs" %\*/);
+  assert.match(cmd, /exit \/b 0/);
+  // ...while still allowing an explicit debugging console.
+  assert.match(cmd, /--console/);
+});

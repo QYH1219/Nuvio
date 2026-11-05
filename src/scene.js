@@ -49,6 +49,8 @@ export class BackgroundEngine {
     this.disposed = false;
     this.webFrame = null;
     this.contextLost = false;
+    this._restoreAttempts = 0;
+    this._restoreTimer = 0;
     this.focused = typeof document === 'undefined' ? true : document.hasFocus();
 
     this.canvas = document.createElement('canvas');
@@ -62,7 +64,11 @@ export class BackgroundEngine {
       // cannot be toggled after context creation either, so leaving it off
       // keeps every tier on the exact same shader/compositing path.
       antialias: false,
-      alpha: false,
+      // Transparent-capable output. The shader still writes opaque pixels, so
+      // normal frames are unchanged; if the GPU drops the context the canvas
+      // stops compositing as a black rectangle and the themed CSS backdrop
+      // underneath shows through instead.
+      alpha: true,
       powerPreference: 'default',
       preserveDrawingBuffer: false,
     });
@@ -129,14 +135,25 @@ export class BackgroundEngine {
       this.wake();
     };
     this._onContextLost = (event) => {
-      // Three.js already prevents the default so the context can be restored.
-      // Only stop our frame loop and remember the state.
+      // Chrome only restores the context when the default is prevented.
+      event.preventDefault?.();
       this.contextLost = true;
+      // A lost WebGL canvas composites as opaque black, and Codex's own
+      // surfaces are transparent while Nuvio runs. Hiding the canvas reveals
+      // the themed backdrop instead of a full black page.
+      this.canvas.style.visibility = 'hidden';
       this._cancel();
-      console.warn('[codex-bg] WebGL context lost');
+      console.warn('[codex-bg] WebGL context lost; showing CSS backdrop');
+      this._scheduleContextRestore();
     };
     this._onContextRestored = () => {
       this.contextLost = false;
+      this._restoreAttempts = 0;
+      if (this._restoreTimer) {
+        clearTimeout(this._restoreTimer);
+        this._restoreTimer = 0;
+      }
+      this.canvas.style.visibility = '';
       const mark = (texture) => {
         if (texture && typeof texture === 'object') texture.needsUpdate = true;
       };
@@ -163,6 +180,28 @@ export class BackgroundEngine {
     this._resizeObserver = new ResizeObserver(() => this.resize());
     this._resizeObserver.observe(container);
     this.resize();
+  }
+
+  /**
+   * A lost context does not always come back on its own in Electron (GPU
+   * process restart, driver TDR). Ask three times over six seconds; the CSS
+   * backdrop keeps the app readable while that happens.
+   */
+  _scheduleContextRestore() {
+    if (this.disposed || !this.contextLost) return;
+    if (this._restoreAttempts >= 3) return;
+    this._restoreAttempts += 1;
+    this._restoreTimer = setTimeout(() => {
+      this._restoreTimer = 0;
+      if (this.disposed || !this.contextLost) return;
+      try {
+        this.renderer.forceContextRestore?.();
+      } catch {
+        /* extension missing; Chrome may still restore it by itself */
+      }
+      this._scheduleContextRestore();
+    }, 2000);
+    this._restoreTimer.unref?.();
   }
 
   /* ---------------------------------------------------------------- */
@@ -793,6 +832,10 @@ export class BackgroundEngine {
     this.disposed = true;
     this._running = false;
     this._cancel();
+    if (this._restoreTimer) {
+      clearTimeout(this._restoreTimer);
+      this._restoreTimer = 0;
+    }
     window.removeEventListener('pointermove', this._onPointerMove);
     document.removeEventListener('visibilitychange', this._onVisibility);
     window.removeEventListener('blur', this._onBlur);

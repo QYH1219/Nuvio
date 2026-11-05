@@ -1,6 +1,22 @@
 @echo off
 setlocal
 cd /d "%~dp0"
+
+rem Any entry point (old shortcut, Explorer double-click, taskbar pin) has to
+rem end up in the hidden launcher. Without this, Windows 11 opens a Windows
+rem Terminal window for start.cmd and leaves it sitting there for the whole
+rem session, which is exactly the black window users report.
+rem
+rem --console is the escape hatch for debugging: it keeps this console.
+if /I "%~1"=="--console" goto run_visible
+if not defined NUVIO_HIDDEN (
+  if exist "%~dp0launch-hidden.vbs" (
+    wscript.exe "%~dp0launch-hidden.vbs" %*
+    exit /b 0
+  )
+)
+
+:run_visible
 set "NUVIO_LOG=%TEMP%\nuvio-launch.log"
 
 if defined NUVIO_HIDDEN call :rotate_log

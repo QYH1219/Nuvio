@@ -7,6 +7,7 @@ import {
   applyTheme,
   applyWallpaperLook,
   getTheme,
+  themeBackdrop,
 } from '../src/presets.js';
 
 test('themes have unique ids, palettes and effect values', () => {
@@ -69,4 +70,19 @@ test('wallpaper look keeps the desktop crisp and independent from themes', () =>
   assert.equal(config.vignette, READABILITY.wallpaper.vignette);
   assert.equal(config.bloom, 0.42);
   assert.equal(config.grain, 0.18);
+});
+
+test('theme backdrop is a visible gradient, never a black page', () => {
+  const css = themeBackdrop(getTheme('aurora'));
+  assert.match(css, /radial-gradient\(/);
+  assert.match(css, /linear-gradient\(/);
+  // The base layer must be a real colour, not #000.
+  assert.doesNotMatch(css, /#000\b|#000000\b/);
+  assert.match(css, /rgba\(/);
+});
+
+test('theme backdrop falls back safely for an unknown theme', () => {
+  const css = themeBackdrop(undefined);
+  assert.match(css, /radial-gradient\(/);
+  assert.match(css, /rgba\(27, 111, 120, 0\.32\)/);
 });

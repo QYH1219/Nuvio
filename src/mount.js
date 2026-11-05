@@ -36,6 +36,7 @@ import {
   applyTheme,
   applyReadability,
   applyWallpaperLook,
+  themeBackdrop,
 } from './presets.js';
 import { createHud, createHints, createPanel, createMock } from './ui.js';
 import { nextRotationEntry } from './rotation.js';
@@ -169,6 +170,15 @@ export async function mount(host, options = {}) {
   host.appendChild(root);
   if (embed) document.body.classList.add('cxd-embedded');
 
+  // Always keep a themed backdrop under the canvas. Codex is forced
+  // transparent while Nuvio is active, so a blank canvas (GPU context lost,
+  // first frame not painted yet, wallpaper still decoding) would show as a
+  // solid black page instead of "nothing".
+  const paintBackdrop = () => {
+    root.style.background = themeBackdrop(getTheme(config.theme));
+  };
+  paintBackdrop();
+
   let disposed = false;
   let engine = null;
   let compatState = { status: 'unknown', matched: 0, total: 0, missing: [] };
@@ -180,8 +190,7 @@ export async function mount(host, options = {}) {
     // also remove the fallback and leave Codex with a transparent/black window
     // depending on the host, which looks like Nuvio crashed the app.
     root.classList.add('cxd-fallback');
-    root.style.background =
-      'radial-gradient(60% 60% at 62% 62%, rgba(52,180,175,.28), transparent 70%), radial-gradient(50% 50% at 20% 18%, rgba(120,92,180,.22), transparent 70%), #04060b';
+    paintBackdrop();
     root.querySelectorAll('canvas').forEach((canvas) => canvas.remove());
     // A static fallback still needs to report why the dynamic layer is gone.
     root.dataset.cxdError = String(error?.message || error || 'webgl-unavailable');
@@ -1018,6 +1027,7 @@ export async function mount(host, options = {}) {
   }
 
   function syncUI() {
+    paintBackdrop();
     if (panelRef) panelRef.sync();
     applyVisibility();
   }
