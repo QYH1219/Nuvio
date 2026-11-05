@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ICON = join(ROOT, 'public', 'icon.ico');
+const LAUNCHER = join(ROOT, 'launch-hidden.vbs');
 const IS_WIN = process.platform === 'win32';
 
 function parseArgs(argv) {
@@ -44,7 +45,7 @@ function runPowerShell(script, dryRun) {
   if (result.status !== 0) throw new Error(`PowerShell exited with code ${result.status}`);
 }
 
-function shortcutScript({ name, target, description, remove, cleanup = [] }) {
+function shortcutScript({ name, target, args, description, remove, cleanup = [] }) {
   const all = [name, ...cleanup];
   const list = `@(${all.map(psQuote).join(', ')})`;
   const lines = [
@@ -70,13 +71,13 @@ function shortcutScript({ name, target, description, remove, cleanup = [] }) {
   lines.push('$shell = New-Object -ComObject WScript.Shell');
   lines.push('$link = $shell.CreateShortcut($path)');
   lines.push(`$link.TargetPath = ${psQuote(target)}`);
-  lines.push('$link.Arguments = ""');
+  lines.push(`$link.Arguments = ${psQuote(args)}`);
   lines.push(`$link.WorkingDirectory = ${psQuote(ROOT)}`);
   lines.push(`$link.Description = ${psQuote(description)}`);
   if (existsSync(ICON)) lines.push(`$link.IconLocation = ${psQuote(`${ICON},0`)}`);
-  // Keep the resident injector out of the way; the user can restore the
-  // console from the taskbar when they need to read the log.
-  lines.push('$link.WindowStyle = 7');
+  // launch-hidden.vbs starts start.cmd with a hidden console, so Windows 11
+  // never hands the console to Windows Terminal and flashes a blank window.
+  lines.push(`$link.WindowStyle = ${args ? 1 : 7}`);
   lines.push('$link.Save()');
   lines.push('Write-Host "[nuvio] shortcut" $path');
   return lines.join('\n');
@@ -93,22 +94,24 @@ function main() {
   }
   const name = options.name || 'Nuvio.lnk';
   const target = join(ROOT, 'start.cmd');
+  const useHiddenLauncher = existsSync(LAUNCHER);
 
-  if (!options.remove && !existsSync(target)) {
-    throw new Error(`missing ${target}`);
+  if (!options.remove && !existsSync(useHiddenLauncher ? LAUNCHER : target)) {
+    throw new Error(`missing ${useHiddenLauncher ? LAUNCHER : target}`);
   }
 
   runPowerShell(
     shortcutScript({
       name,
-      target,
+      target: useHiddenLauncher ? join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'wscript.exe') : target,
+      args: useHiddenLauncher ? `"${LAUNCHER}"` : '',
       description: '打开即注入已保存的动态壁纸背景（需要时会自动重启一次 Codex）',
       remove: options.remove,
       cleanup: LEGACY_NAMES,
     }),
     options.dryRun,
   );
-  console.log(`[nuvio] target: ${target}`);
+  console.log(`[nuvio] target: ${useHiddenLauncher ? `${LAUNCHER} (hidden)` : target}`);
 }
 
 try {

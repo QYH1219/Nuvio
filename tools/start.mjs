@@ -302,7 +302,9 @@ function printInjectorLogTail(lines = 18) {
 }
 
 async function askYesNo(question) {
-  if (!process.stdin.isTTY) return false;
+  // launch-hidden.vbs runs without a visible console. Never block on a prompt
+  // the user cannot see; the shortcut passes --yes when a restart is allowed.
+  if (!process.stdin.isTTY || process.env.NUVIO_HIDDEN === '1') return false;
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
     const answer = await rl.question(question);

@@ -51,6 +51,7 @@ function collect() {
     'package.json',
     'start.cmd',
     'start.sh',
+    'launch-hidden.vbs',
     'restart.cmd',
     'README.md',
     'README.en.md',

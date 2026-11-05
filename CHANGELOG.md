@@ -2,6 +2,27 @@
 
 All notable changes to this project are documented here.
 
+## [0.6.2] - 2026-11-05
+
+### Fixed
+
+- Windows launch no longer flashes or leaves a blank console / Windows Terminal
+  window. The desktop and Startup shortcuts now call `launch-hidden.vbs`
+  (`wscript.exe`, hidden window), which starts `start.cmd` with a fully hidden
+  console.
+- `start.cmd` skips `pause` in hidden mode and writes startup failures to
+  `%TEMP%\nuvio-launch.log`, so a failed launch cannot leave an invisible
+  console waiting forever.
+- `start.mjs` never waits on the Codex restart confirmation while running
+  hidden (`NUVIO_HIDDEN=1`). The Startup shortcut passes `--yes` so login
+  restore can add the CDP port once without hanging on an unseen `Y/N` prompt;
+  the desktop shortcut exits quietly when Codex has no CDP port instead of
+  interrupting an open session.
+
+### Changed
+
+- `restart.mjs` starts the replacement process with `windowsHide` as well.
+
 ## [0.6.1] - 2026-11-04
 
 ### Fixed

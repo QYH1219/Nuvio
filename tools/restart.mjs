@@ -96,7 +96,7 @@ async function main() {
   }
 
   const args = [join(ROOT, 'tools', 'start.mjs'), '--port', String(options.port), '--wait', String(options.wait), ...options.forward];
-  const child = spawn(process.execPath, args, { cwd: ROOT, stdio: 'inherit' });
+  const child = spawn(process.execPath, args, { cwd: ROOT, stdio: 'inherit', windowsHide: true });
   child.on('exit', (code) => {
     process.exitCode = code ?? 1;
   });

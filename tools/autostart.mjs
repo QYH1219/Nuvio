@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ICON = join(ROOT, 'public', 'icon.ico');
+const LAUNCHER = join(ROOT, 'launch-hidden.vbs');
 const NAME = 'Nuvio.lnk';
 
 export function autostartSupported() {
@@ -74,19 +75,20 @@ export function enableAutostart() {
   if (!autostartSupported()) {
     throw new Error('开机自启仅支持 Windows；macOS/Linux 请使用系统登录项');
   }
+  const useHiddenLauncher = existsSync(LAUNCHER);
   const lines = [
     "$ErrorActionPreference = 'Stop'",
     "$startup = [Environment]::GetFolderPath('Startup')",
     `$path = Join-Path $startup ${psQuote(NAME)}`,
     '$shell = New-Object -ComObject WScript.Shell',
     '$link = $shell.CreateShortcut($path)',
-    `$link.TargetPath = ${psQuote(join(ROOT, 'start.cmd'))}`,
-    '$link.Arguments = ""',
+    `$link.TargetPath = ${psQuote(useHiddenLauncher ? join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'wscript.exe') : join(ROOT, 'start.cmd'))}`,
+    `$link.Arguments = ${psQuote(useHiddenLauncher ? `"${LAUNCHER}" --yes` : '')}`,
     `$link.WorkingDirectory = ${psQuote(ROOT)}`,
     "$link.Description = 'Nuvio · 登录时恢复动态壁纸'",
   ];
   if (existsSync(ICON)) lines.push(`$link.IconLocation = ${psQuote(`${ICON},0`)}`);
-  lines.push('$link.WindowStyle = 7');
+  lines.push(`$link.WindowStyle = ${useHiddenLauncher ? 1 : 7}`);
   lines.push('$link.Save()');
   runPowerShell(lines.join('\n'));
   return getAutostartStatus();

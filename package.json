@@ -1,7 +1,7 @@
 {
   "name": "nuvio",
   "private": true,
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "Nuvio — a lightweight, DIY animated wallpaper layer for Codex Desktop, with Wallpaper Engine workshop detection.",
   "license": "MIT",
   "author": "QuisVic",
