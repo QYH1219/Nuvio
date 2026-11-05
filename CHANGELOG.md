@@ -14,10 +14,8 @@ All notable changes to this project are documented here.
   `%TEMP%\nuvio-launch.log`, so a failed launch cannot leave an invisible
   console waiting forever.
 - `start.mjs` never waits on the Codex restart confirmation while running
-  hidden (`NUVIO_HIDDEN=1`). The Startup shortcut passes `--yes` so login
-  restore can add the CDP port once without hanging on an unseen `Y/N` prompt;
-  the desktop shortcut exits quietly when Codex has no CDP port instead of
-  interrupting an open session.
+  hidden (`NUVIO_HIDDEN=1`). Both shortcuts pass `--yes`, so a one-click start
+  can add the CDP port once instead of hanging on an unseen `Y/N` prompt.
 
 ### Changed
 
