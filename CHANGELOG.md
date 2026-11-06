@@ -2,6 +2,38 @@
 
 All notable changes to this project are documented here.
 
+## [0.6.4] - 2026-11-06
+
+### Fixed
+
+- Video wallpapers now pause when Codex is hidden or unfocused, and resume on
+  return. The element kept decoding frames even after the render loop was
+  cancelled, which wasted GPU time in the background.
+- The refused-autoplay retry listeners are dropped as soon as a wallpaper is
+  replaced, so an old video can no longer start playing after a later click.
+- Local video and Wallpaper Engine scene imports now show a first-frame
+  thumbnail in the current-wallpaper card instead of a blank slot.
+- Asset imports report stage progress and can be cancelled. Cancelling after
+  the record was written rolls back to the previous asset instead of leaving a
+  half-applied wallpaper.
+- Dragging a slider no longer stringifies the config to `localStorage` and
+  rebuilds the 2048×1152 fallback texture on every pointer event. Saves are
+  debounced and flushed when the panel closes, the page hides, or the runtime
+  is disposed.
+- Numeric settings restored from `localStorage` or an import are clamped to
+  their real control ranges. An out-of-range `dim`/`motion` value can no longer
+  paint the scene black with no obvious way back.
+- Rotation minutes now share a single 1–240 range between config restore, the
+  panel, and the scheduler.
+- The vignette slider is hidden in wallpaper mode, where the post-processing
+  chain is not loaded and the control had no effect.
+- Resetting the look section also restores the readability preset instead of
+  leaving the panel claiming a custom/dimmed look.
+- A Codex selector mismatch now shows a small warning dot on the gear instead
+  of silently leaving parts of the host UI opaque.
+- README bundle figures now match the shipped build (about 836 KB raw, 231 KB
+  gzip).
+
 ## [0.6.3] - 2026-11-05
 
 ### Fixed

@@ -285,7 +285,7 @@ npm run size      # raw / gzip size report
 npm run sign      # optional: sign the portable zip when NUVIO_SIGN_CERT is set
 ```
 
-The injected runtime is about 800 KB raw (~220 KB gzip). The resident injector
+The injected runtime is about 836 KB raw (~231 KB gzip). The resident injector
 serves it over local HTTP with gzip + ETag caching by default, so reloads only
 execute a tiny loader; if the local server is unavailable it falls back to the
 inline CDP bundle automatically.

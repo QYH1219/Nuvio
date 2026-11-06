@@ -284,6 +284,8 @@ export function loadVideo(url) {
 }
 
 export async function startVideo(video) {
+  // A previous wallpaper's refused-autoplay retry must not resurrect it.
+  stopVideoRetry();
   if (!video || video.paused === false) return;
 
   const attempt = async () => {
@@ -300,13 +302,68 @@ export async function startVideo(video) {
   // Autoplay can be refused until the page has a user gesture. Retry once on
   // the first interaction; the paused first frame is still rendered meanwhile.
   const retry = async () => {
-    if (await attempt()) {
-      window.removeEventListener('pointerdown', retry);
-      window.removeEventListener('keydown', retry);
-    }
+    if (await attempt()) stopVideoRetry();
   };
   window.addEventListener('pointerdown', retry);
   window.addEventListener('keydown', retry);
+  activeVideoRetry = retry;
+}
+
+let activeVideoRetry = null;
+
+/**
+ * Drop the pending autoplay retry listener. Without this every wallpaper
+ * switch that hit an autoplay block left two window listeners behind forever.
+ */
+export function stopVideoRetry() {
+  if (!activeVideoRetry) return;
+  window.removeEventListener('pointerdown', activeVideoRetry);
+  window.removeEventListener('keydown', activeVideoRetry);
+  activeVideoRetry = null;
+}
+
+function drawThumb(source, width, height, maxWidth = 480) {
+  if (!width || !height) return '';
+  try {
+    const w = Math.max(1, Math.min(maxWidth, Math.round(width)));
+    const h = Math.max(1, Math.round((w * height) / width));
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return '';
+    ctx.drawImage(source, 0, 0, w, h);
+    return canvas.toDataURL('image/jpeg', 0.72);
+  } catch {
+    // Tainted canvas (remote cross-origin art) or an undecoded frame.
+    return '';
+  }
+}
+
+/** Static thumb for an already decoded image / scene artwork. */
+export function captureImageThumb(image) {
+  return drawThumb(image, image?.naturalWidth || image?.width, image?.naturalHeight || image?.height);
+}
+
+/**
+ * First presented video frame as a small data URL. Resolves '' when the frame
+ * is not available yet, so the caller can keep the placeholder card.
+ */
+export function captureVideoThumb(video, { timeoutMs = 1500 } = {}) {
+  if (!video || !video.videoWidth) return Promise.resolve('');
+  const draw = () => drawThumb(video, video.videoWidth, video.videoHeight);
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+    if (typeof video.requestVideoFrameCallback === 'function') {
+      video.requestVideoFrameCallback(() => finish(draw()));
+    }
+    setTimeout(() => finish(draw()), timeoutMs);
+  });
 }
 
 /** Procedural fallback so the demo looks finished before real art arrives. */

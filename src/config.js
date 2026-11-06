@@ -92,6 +92,39 @@ export const DEFAULTS = {
   showPanel: false,
 };
 
+/**
+ * Slider bounds live in one table so the panel, config import and the
+ * localStorage restore agree on what "in range" means. Without this an
+ * imported `{"dim": 5}` multiplies the shader by -4 and paints the window
+ * black with no way back except a full reset.
+ */
+export const NUMERIC_LIMITS = {
+  surfaceOpacity: [0, 1],
+  dim: [0, 0.8],
+  vignette: [0, 1],
+  motion: [0, 2],
+  parallax: [0, 2],
+  bloom: [0, 2],
+  grain: [0, 1.5],
+  sceneShake: [0, 2],
+  sceneSway: [0, 2],
+  sceneWater: [0, 2],
+  modelScale: [0.4, 2],
+  modelSpin: [0, 1.5],
+  modelX: [-1, 1],
+  modelY: [-1, 1],
+  rotationMinutes: [1, 240],
+};
+
+/** Clamp a finite number into its control range; unknown keys pass through. */
+export function clampNumber(key, value) {
+  const range = NUMERIC_LIMITS[key];
+  if (!range) return value;
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return DEFAULTS[key];
+  return Math.min(range[1], Math.max(range[0], numeric));
+}
+
 export function loadConfig() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -103,10 +136,11 @@ export function loadConfig() {
     merged.showAdvanced = Boolean(merged.showAdvanced);
     merged.webInteractive = Boolean(merged.webInteractive);
     if (!FIT_IDS.includes(merged.fit)) merged.fit = DEFAULTS.fit;
-    const rotation = Number(merged.rotationMinutes);
-    merged.rotationMinutes = Number.isFinite(rotation)
-      ? Math.min(1440, Math.max(1, Math.round(rotation)))
-      : DEFAULTS.rotationMinutes;
+    Object.keys(NUMERIC_LIMITS).forEach((key) => {
+      const value = Number(merged[key]);
+      merged[key] = Number.isFinite(value) ? clampNumber(key, value) : DEFAULTS[key];
+    });
+    merged.rotationMinutes = Math.round(merged.rotationMinutes);
     merged.favoriteIds = Array.isArray(merged.favoriteIds)
       ? [...new Set(merged.favoriteIds.filter((id) => /^\d{4,20}$/.test(String(id))).map(String))].slice(0, 200)
       : [];

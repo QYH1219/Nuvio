@@ -81,9 +81,25 @@ test('rotationMinutes is clamped to a usable window', () => {
   saveConfig({ rotationMinutes: 0 });
   assert.equal(loadConfig().rotationMinutes, 1);
   saveConfig({ rotationMinutes: 99999 });
-  assert.equal(loadConfig().rotationMinutes, 1440);
+  assert.equal(loadConfig().rotationMinutes, 240);
   saveConfig({ rotationMinutes: 12.6 });
   assert.equal(loadConfig().rotationMinutes, 13);
   saveConfig({ rotationMinutes: 'soon' });
   assert.equal(loadConfig().rotationMinutes, DEFAULTS.rotationMinutes);
+});
+
+test('numeric settings are clamped on load and restore the default when invalid', () => {
+  saveConfig({ dim: 5, motion: -1, grain: 9, modelScale: 0 });
+  const config = loadConfig();
+  assert.equal(config.dim, 0.8);
+  assert.equal(config.motion, 0);
+  assert.equal(config.grain, 1.5);
+  assert.equal(config.modelScale, 0.4);
+
+  saveConfig({ dim: 'nope', vignette: 'nope', bloom: null });
+  const invalid = loadConfig();
+  assert.equal(invalid.dim, DEFAULTS.dim);
+  assert.equal(invalid.vignette, DEFAULTS.vignette);
+  // null coerces to 0, which is a legal bloom value.
+  assert.equal(invalid.bloom, 0);
 });

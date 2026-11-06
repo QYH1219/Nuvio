@@ -1,5 +1,6 @@
 import {
   clamp,
+  clampNumber,
   loadConfig,
   saveConfig,
   resetConfig,
@@ -15,6 +16,8 @@ import {
   loadVideo,
   loadSceneWallpaper,
   startVideo,
+  captureVideoThumb,
+  captureImageThumb,
   createFallbackBackground,
 } from './assets.js';
 import {
@@ -140,10 +143,10 @@ function sanitizeConfigPatch(input) {
       const numeric = Number(value);
       if (!Number.isFinite(numeric)) return;
       if (key === 'rotationMinutes') {
-        patch[key] = Math.min(1440, Math.max(1, Math.round(numeric)));
+        patch[key] = Math.round(clampNumber(key, numeric));
         return;
       }
-      patch[key] = numeric;
+      patch[key] = clampNumber(key, numeric);
       return;
     }
     patch[key] = value;
@@ -251,6 +254,7 @@ export async function mount(host, options = {}) {
     model: 'placeholder',
     source: { type: 'procedural', id: '', title: '' },
     sceneMissing: [],
+    previewDataUrl: '',
   };
 
   let userAssets = { background: null, model: null, cleanup() {} };
@@ -341,8 +345,31 @@ export async function mount(host, options = {}) {
   };
 
   let fallbackToken = 0;
+  let fallbackTheme = config.theme;
+  let saveTimer = 0;
+
+  /**
+   * Persist at most a few times per second. A range drag used to stringify the
+   * whole config and hit localStorage on every input event.
+   */
+  function scheduleSave() {
+    if (saveTimer) return;
+    saveTimer = setTimeout(() => {
+      saveTimer = 0;
+      saveConfig(config);
+    }, 200);
+  }
+
+  function flushSave() {
+    if (!saveTimer) return;
+    clearTimeout(saveTimer);
+    saveTimer = 0;
+    saveConfig(config);
+  }
+
   async function refreshFallbackTexture() {
     if (!engine || assets.background !== 'placeholder') return;
+    fallbackTheme = config.theme;
     const token = ++fallbackToken;
     try {
       const image = createFallbackBackground(2048, 1152, getTheme(config.theme).palette);
@@ -432,7 +459,11 @@ export async function mount(host, options = {}) {
     return '程序化背景';
   }
 
-  /** Thumbnail for the "current wallpaper" card. Video/scene have no cheap thumb. */
+  /**
+   * Thumbnail for the "current wallpaper" card. Workshop entries use the
+   * preview the workshop ships; local video/scene art uses a first-frame
+   * capture taken when it was applied.
+   */
   function currentPreviewUrl() {
     if (!backgroundIsArtwork()) return '';
     const source = assets.source || {};
@@ -441,6 +472,9 @@ export async function mount(host, options = {}) {
     }
     if (assets.background === 'image') {
       return userAssets.background?.url || assets.imageUrl || '';
+    }
+    if (assets.background === 'video' || assets.background === 'scene') {
+      return assets.previewDataUrl || '';
     }
     return '';
   }
@@ -457,6 +491,7 @@ export async function mount(host, options = {}) {
     assets.background = 'placeholder';
     assets.source = probed.source || { type: 'procedural', id: '', title: '' };
     assets.sceneMissing = [];
+    assets.previewDataUrl = '';
 
     if (probed.videoUrl) {
       try {
@@ -464,6 +499,13 @@ export async function mount(host, options = {}) {
         await engine.setBackgroundVideo(video);
         startVideo(video);
         assets.background = 'video';
+        // The panel card wants a still; grabbing the first presented frame
+        // must not delay startup, so it lands asynchronously.
+        captureVideoThumb(video).then((url) => {
+          if (!url || assets.background !== 'video' || disposed) return;
+          assets.previewDataUrl = url;
+          panelRef?.refreshAssets?.();
+        });
       } catch (error) {
         console.warn('[codex-bg] background video failed, trying next source', error);
         assets.videoUrl = null;
@@ -477,6 +519,7 @@ export async function mount(host, options = {}) {
         assets.background = 'scene';
         assets.scene = scene.meta;
         assets.sceneMissing = Array.isArray(scene.missingTextures) ? scene.missingTextures : [];
+        assets.previewDataUrl = captureImageThumb(scene.image);
       } catch (error) {
         console.warn('[codex-bg] scene wallpaper failed, trying next source', error);
         assets.sceneUrl = null;
@@ -617,16 +660,31 @@ export async function mount(host, options = {}) {
    * Validate first, then persist, then render. The old record and old object
    * URLs stay alive until the new asset has actually painted.
    */
-  async function installUserAsset(slot, file) {
+  async function installUserAsset(slot, file, context = {}) {
+    const { signal, onProgress } = context;
+    const aborted = () => new DOMException('asset import aborted', 'AbortError');
+    // IndexedDB has no byte-level progress callback, so report honest stages
+    // and treat every awaited boundary as a cancellation checkpoint.
+    const step = (pct, phase) => {
+      if (signal?.aborted) throw aborted();
+      onProgress?.(pct, phase);
+    };
+
     const previous = userAssets;
+    step(10, 'validate');
     await validatePickedAsset(slot, file);
 
+    step(30, 'prepare');
     const previousRecord = await getAssetRecord(slot);
+    if (signal?.aborted) throw aborted();
     await saveAsset(slot, file);
 
     let loaded;
     try {
+      // Inside the try: an abort here must still roll the record back.
+      step(55, 'save');
       loaded = await loadUserAssetUrls({ strict: true });
+      step(75, 'load');
     } catch (error) {
       await rollbackAssetRecord(slot, previousRecord);
       throw error;
@@ -642,6 +700,7 @@ export async function mount(host, options = {}) {
     userAssets = next;
 
     try {
+      step(90, 'apply');
       if (slot === 'model') {
         if (!next.model?.url) throw new Error('素材库没有返回模型文件');
         await applyModel(next.model.url, { strict: true, timeout: 60000 });
@@ -655,6 +714,9 @@ export async function mount(host, options = {}) {
         engine.setConfig(config);
         panelRef?.sync();
       }
+      // Late cancel must still restore the previous wallpaper rather than
+      // leaving a half-applied import on screen.
+      step(100, 'done');
     } catch (error) {
       userAssets = previous;
       next.cleanup([slot]);
@@ -719,7 +781,7 @@ export async function mount(host, options = {}) {
   function armRotation() {
     clearRotation();
     if (disposed || embed || !config.rotationEnabled || !hasWorkshopApi()) return;
-    const minutes = clamp(Number(config.rotationMinutes) || 30, 1, 1440);
+    const minutes = clampNumber('rotationMinutes', Number(config.rotationMinutes) || 30);
     rotationTimer = setTimeout(() => {
       rotationTimer = 0;
       rotateOnce().finally(() => armRotation());
@@ -839,11 +901,17 @@ export async function mount(host, options = {}) {
           governor.reset();
           if (!autoChangingQuality) config.autoQualityFrom = '';
         }
+        // Sliders fire on every pointer move. engine.setConfig is just uniform
+        // writes, but JSON.stringify + localStorage and a 2048px fallback
+        // repaint per event is what made dragging feel sticky.
         engine.setConfig(config);
         engine.setFit(config.fit);
-        saveConfig(config);
+        scheduleSave();
         applyVisibility();
-        refreshFallbackTexture();
+        if (config.theme !== fallbackTheme) {
+          fallbackTheme = config.theme;
+          refreshFallbackTexture();
+        }
         updateTierLabel();
         armRotation();
       },
@@ -877,8 +945,8 @@ export async function mount(host, options = {}) {
         refreshFallbackTexture();
         armRotation();
       },
-      onAsset: async (slot, file) => {
-        await queueAsset(() => installUserAsset(slot, file));
+      onAsset: async (slot, file, context) => {
+        await queueAsset(() => installUserAsset(slot, file, context || {}));
       },
       onClearAsset: async (slot) => {
         await queueAsset(() => clearUserAsset(slot));
@@ -972,7 +1040,12 @@ export async function mount(host, options = {}) {
       !open && document.activeElement && panelRef?.panel.contains(document.activeElement),
     );
     config.showPanel = Boolean(open);
-    if (persist) saveConfig(config);
+    if (persist) {
+      // Closing the panel is the natural commit point: write any debounced
+      // slider value before it can be lost to a reload.
+      flushSave();
+      saveConfig(config);
+    }
     syncPanelState();
     if (open) {
       panelRef?.panel.querySelector('[data-close]')?.focus({ preventScroll: true });
@@ -1067,6 +1140,7 @@ export async function mount(host, options = {}) {
     }
   };
   window.addEventListener('keydown', onKeyDown, true);
+  window.addEventListener('pagehide', flushSave);
 
   if (!embed) {
     root.addEventListener('pointerdown', (event) => {
@@ -1086,14 +1160,36 @@ export async function mount(host, options = {}) {
   const compatProbe = installCompatProbe(document, (state) => {
     compatState = state;
     window.__CXD_COMPAT__ = state;
+    updateCompatBadge();
   });
+
+  /**
+   * A Codex update that renames the shell selectors used to look like "Nuvio
+   * broke". Put a dot on the gear instead, so the user has somewhere to click
+   * before reporting a bug.
+   */
+  function updateCompatBadge() {
+    if (!gear) return;
+    const partial = compatState.status === 'partial';
+    gear.classList.toggle('is-compat-warn', partial);
+    if (!partial) {
+      gear.title = '背景设置 (G)';
+      gear.removeAttribute('data-compat-warn');
+      return;
+    }
+    const missing = Array.isArray(compatState.missing) ? compatState.missing.join('、') : '部分界面';
+    gear.title = `背景设置 (G) · 界面兼容警告：未匹配 ${missing}`;
+    gear.dataset.compatWarn = missing;
+  }
 
   function dispose() {
     if (disposed) return;
     disposed = true;
+    flushSave();
     compatProbe?.stop();
     clearRotation();
     window.removeEventListener('keydown', onKeyDown, true);
+    window.removeEventListener('pagehide', flushSave);
     try {
       userAssets.cleanup();
     } catch {

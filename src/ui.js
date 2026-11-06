@@ -67,7 +67,10 @@ const SECTIONS = [
       },
       { type: 'range', key: 'surfaceOpacity', label: '界面磨砂强度', min: 0, max: 1, step: 0.01 },
       { type: 'range', key: 'dim', label: '背景压暗', min: 0, max: 0.8, step: 0.01 },
-      { type: 'range', key: 'vignette', label: '暗角', min: 0, max: 1, step: 0.01 },
+      // The vignette lives in the procedural post chain; wallpaper mode tears
+      // that chain down (scene.js setArtworkMode) and its shader has no
+      // vignette uniform, so the slider would change nothing.
+      { type: 'range', key: 'vignette', label: '暗角', min: 0, max: 1, step: 0.01, when: 'procedural' },
     ],
   },
   {
@@ -266,6 +269,10 @@ export function createPanel(config, handlers = {}, options = {}) {
         sectionKeys.forEach((key) => {
           if (key in DEFAULTS) config[key] = DEFAULTS[key];
         });
+        // The look section writes surfaceOpacity/dim/vignette back to the
+        // balanced preset values, so the hidden label must not keep claiming
+        // "custom" (import/applyWallpaperLook read it).
+        if (section.id === 'look') config.readability = DEFAULTS.readability;
         sync();
         onChange(config);
         flash(`${section.title}已恢复默认`);
@@ -686,6 +693,10 @@ export function createPanel(config, handlers = {}, options = {}) {
     wallpaperNote.className = 'cxd-wallpaper-note';
     wallpaperNote.textContent = '桌面壁纸模式 · 主题已自动关闭';
 
+    // One in-flight import per slot. It lets the row expose a cancel button and
+    // keeps stage progress on the label instead of only a static "正在导入…".
+    const imports = new Map();
+
     const rows = [
       ['background', '背景'],
       ['model', '模型'],
@@ -724,10 +735,20 @@ export function createPanel(config, handlers = {}, options = {}) {
           flash(error?.message || '清除失败');
         }
       });
-      actions.append(pick, clear);
+
+      const cancel = document.createElement('button');
+      cancel.type = 'button';
+      cancel.className = 'cxd-asset-cancel';
+      cancel.textContent = '取消';
+      cancel.hidden = true;
+      cancel.addEventListener('click', () => {
+        imports.get(slot)?.controller.abort();
+      });
+
+      actions.append(pick, cancel, clear);
       row.append(meta, actions);
       row.dataset.assetRow = slot;
-      return { row, clear };
+      return { row, clear, cancel, value };
     });
 
     const drop = document.createElement('div');
@@ -1027,15 +1048,42 @@ export function createPanel(config, handlers = {}, options = {}) {
 
   async function handleAsset(slot, file, labelEl) {
     if (!onAsset) return;
-    if (labelEl) labelEl.textContent = '正在导入…';
+    const entry = rows.find((item) => item.row.dataset.assetRow === slot);
+    const target = labelEl || entry?.value || null;
+    const previous = imports.get(slot);
+    if (previous) previous.controller.abort();
+
+    const controller = new AbortController();
+    const job = { controller };
+    imports.set(slot, job);
+    if (entry?.cancel) {
+      entry.cancel.hidden = false;
+      entry.cancel.disabled = false;
+    }
+    const drawProgress = (value, phase) => {
+      if (imports.get(slot) !== job || !target) return;
+      const pct = Math.max(0, Math.min(100, Math.round(value)));
+      target.textContent = phase && pct >= 100 ? '导入完成' : `正在导入… ${pct}%`;
+    };
+    drawProgress(0, 'start');
     try {
-      await onAsset(slot, file);
+      await onAsset(slot, file, { signal: controller.signal, onProgress: drawProgress });
+      if (imports.get(slot) === job) drawProgress(100, 'done');
       refreshAssets();
       flash('素材已应用');
     } catch (error) {
-      console.warn('[codex-bg] asset import failed', error);
-      flash(error?.message || '素材导入失败');
+      if (error?.name === 'AbortError') {
+        flash('已取消导入');
+      } else {
+        console.warn('[codex-bg] asset import failed', error);
+        flash(error?.message || '素材导入失败');
+      }
       refreshAssets();
+    } finally {
+      if (imports.get(slot) === job) {
+        imports.delete(slot);
+        if (entry?.cancel) entry.cancel.hidden = true;
+      }
     }
   }
 

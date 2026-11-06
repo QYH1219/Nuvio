@@ -8,6 +8,7 @@ import {
   screenTextureEdges,
   summarizeTextures,
 } from './texture.js';
+import { stopVideoRetry } from './assets.js';
 
 const IDLE_PAUSE_MS = 1400;
 
@@ -115,8 +116,10 @@ export class BackgroundEngine {
       const hidden = document.hidden;
       this.visible = !hidden;
       if (hidden) {
+        this.backgroundVideo?.pause();
         this._cancel();
       } else {
+        this.backgroundVideo?.play?.().catch(() => {});
         this._last = 0;
         this._lastRender = 0;
         this._needsRepaint = true;
@@ -125,10 +128,16 @@ export class BackgroundEngine {
     };
     this._onBlur = () => {
       this.focused = false;
-      if (this.config.pauseWhenUnfocused) this._cancel();
+      if (this.config.pauseWhenUnfocused) {
+        // Pause the element too; a VideoTexture keeps decoding frames even
+        // when the render loop is cancelled.
+        this.backgroundVideo?.pause();
+        this._cancel();
+      }
     };
     this._onFocus = () => {
       this.focused = true;
+      this.backgroundVideo?.play?.().catch(() => {});
       this._last = 0;
       this._lastRender = 0;
       this._needsRepaint = true;
@@ -447,6 +456,9 @@ export class BackgroundEngine {
   }
 
   disposeBackgroundTexture() {
+    // Drop any pending autoplay retry so a replaced wallpaper cannot steal a
+    // later click and start playing again.
+    stopVideoRetry();
     if (this.webFrame) {
       try {
         this.webFrame.removeAttribute('src');
@@ -843,6 +855,7 @@ export class BackgroundEngine {
     this.canvas.removeEventListener('webglcontextlost', this._onContextLost);
     this.canvas.removeEventListener('webglcontextrestored', this._onContextRestored);
     this._resizeObserver.disconnect();
+    stopVideoRetry();
     this.disposeBackgroundTexture();
     this.model?.dispose?.();
     this.particles?.dispose?.();

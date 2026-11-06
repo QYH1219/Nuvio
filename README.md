@@ -41,7 +41,7 @@ Nuvio 是项目的新名字（原代号 Codex Dynamic Background）。改名只�
 - **Codex 透明化**：主面板、左右侧栏改为半透明；壁纸模式下关闭 Codex 工作区伪元素遮罩和毛玻璃，设置页仍回退为不透明。
 - **设置持久化**：参数写入 `localStorage`，下次注入自动恢复。
 - **运行时注入**：通过 Chrome DevTools Protocol 注入，不修改 Codex 安装目录里的任何文件；常驻注入器保证刷新后仍然生效。
-- **轻量注入**：常驻注入器用本地 HTTP + gzip + ETag 缓存运行时（约 210 KB 传输），页面刷新只重新执行一个小 loader，不再反复通过 CDP 发送整套 bundle；本地服务不可用时自动回退到内联 bundle。
+- **轻量注入**：常驻注入器用本地 HTTP + gzip + ETag 缓存运行时（约 231 KB 传输），页面刷新只重新执行一个小 loader，不再反复通过 CDP 发送整套 bundle；本地服务不可用时自动回退到内联 bundle。
 - **诊断与恢复**：面板内「运行状态」显示帧率、GPU、帧率上限、渲染缓冲、贴图显存、draw call，以及缺失的场景贴图 / 被跳过的水面效果；`npm run doctor` 检查构建、素材、CDP 和注入状态；`npm run restore` 一键撤销背景并清理配置。
 - **手动检查更新**：系统分区显示当前版本，点「检查更新」才访问 GitHub Releases；默认不联网、不后台轮询。
 - **无素材可跑**：没有背景图和模型时自动使用程序化背景 + 水晶占位模型。
@@ -318,7 +318,7 @@ npm run size      # 查看运行时 raw / gzip 体积
 npm run sign      # 可选：用 signtool 给便携包签名（需 NUVIO_SIGN_CERT）
 ```
 
-注入 bundle 约 810 KB（gzip 后约 212 KB）。常驻注入器默认走本地 HTTP 缓存，
+注入 bundle 约 836 KB（gzip 后约 231 KB）。常驻注入器默认走本地 HTTP 缓存，
 浏览器只重新执行一个小 loader；断网或端口被占用时自动回退到内联 bundle。
 
 ## 注入 Codex Desktop

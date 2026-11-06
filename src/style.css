@@ -481,6 +481,20 @@ body.cxd-embedded {
   transform: translateY(-1px);
 }
 
+/* Codex renamed a shell selector: the skin still runs, but part of the host
+   UI may not be transparent anymore. Small dot, clickable, no modal. */
+.cxd-gear.is-compat-warn::after {
+  content: '';
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #ff9a5c;
+  box-shadow: 0 0 0 2px rgba(10, 15, 19, 0.8);
+}
+
 .cxd-gear svg {
   width: 17px;
   height: 17px;
@@ -811,7 +825,8 @@ body.cxd-embedded {
 }
 
 .cxd-asset-btn,
-.cxd-asset-clear {
+.cxd-asset-clear,
+.cxd-asset-cancel {
   border-radius: 6px;
   border: 1px solid rgba(255, 255, 255, 0.09);
   background: rgba(255, 255, 255, 0.025);
@@ -832,8 +847,19 @@ body.cxd-embedded {
   font-size: 14px;
 }
 
+.cxd-asset-cancel {
+  padding: 6px 8px;
+  color: rgba(255, 176, 150, 0.85);
+  border-color: rgba(255, 140, 110, 0.28);
+}
+
+.cxd-asset-cancel[hidden] {
+  display: none;
+}
+
 .cxd-asset-btn:hover,
-.cxd-asset-clear:hover {
+.cxd-asset-clear:hover,
+.cxd-asset-cancel:hover {
   color: #fff;
   border-color: rgba(95, 227, 214, 0.35);
   background: rgba(95, 227, 214, 0.08);
@@ -1246,6 +1272,7 @@ body.cxd-embedded {
 .cxd-panel .cxd-asset-meta span,
 .cxd-panel .cxd-asset-btn,
 .cxd-panel .cxd-asset-clear,
+.cxd-panel .cxd-asset-cancel,
 .cxd-panel .cxd-dropzone,
 .cxd-panel .cxd-workshop-tools input,
 .cxd-panel .cxd-workshop-tools select,
