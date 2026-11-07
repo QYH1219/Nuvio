@@ -301,6 +301,25 @@ html[data-cxd-background] [data-cxd-background-layer] > * {
   height: 100% !important;
   pointer-events: none !important;
 }
+/* Heuristic fallback: a Codex update renamed one of the surfaces listed in
+   compat.js. Only the paint is neutralised here; geometry, layout and pointer
+   events stay exactly as Codex shipped them. The attribute is set by
+   applyCompatFallbacks() and only when the primary selector is gone. */
+html[data-cxd-wallpaper="on"] [data-cxd-surface-fallback~="shell"],
+html[data-cxd-wallpaper="on"] [data-cxd-surface-fallback~="sidebar"] {
+  background-color: transparent !important;
+  background-image: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+html[data-cxd-wallpaper="on"] [data-cxd-surface-fallback~="composer"] {
+  background-color: var(--cxd-composer-tint, rgba(255, 255, 255, 0.08)) !important;
+  background-image: none !important;
+  border-color: var(--cxd-composer-border, rgba(255, 255, 255, 0.18)) !important;
+  backdrop-filter: blur(12px) saturate(1.1) !important;
+  -webkit-backdrop-filter: blur(12px) saturate(1.1) !important;
+}
 `;
 
 function ensureStyle(id, text) {

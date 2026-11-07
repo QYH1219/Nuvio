@@ -890,6 +890,7 @@ export async function mount(host, options = {}) {
         ...engine.stats(),
         fps,
         autoDowngraded: governor.applied,
+        perf: governor.describe(config.quality),
         compat: compatState,
       };
       window.__CXD_STATS__ = stats;
@@ -1186,9 +1187,14 @@ export async function mount(host, options = {}) {
       gear.removeAttribute('data-compat-warn');
       return;
     }
-    const missing = Array.isArray(compatState.missing) ? compatState.missing.join('、') : '部分界面';
-    gear.title = `背景设置 (G) · 界面兼容警告：未匹配 ${missing}`;
-    gear.dataset.compatWarn = missing;
+    const missing = Array.isArray(compatState.missing) ? compatState.missing : [];
+    const fallback = Array.isArray(compatState.fallback) ? compatState.fallback : [];
+    const notes = [];
+    if (missing.length) notes.push(`未匹配 ${missing.join('、')}`);
+    if (fallback.length) notes.push(`已几何回退 ${fallback.join('、')}`);
+    const summary = notes.join(' · ') || '部分界面';
+    gear.title = `背景设置 (G) · 界面兼容警告：${summary}`;
+    gear.dataset.compatWarn = summary;
   }
 
   function dispose() {

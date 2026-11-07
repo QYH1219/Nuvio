@@ -42,8 +42,9 @@ Nuvio 是项目的新名字（原代号 Codex Dynamic Background）。改名只�
 - **设置持久化**：参数写入 `localStorage`，下次注入自动恢复。
 - **运行时注入**：通过 Chrome DevTools Protocol 注入，不修改 Codex 安装目录里的任何文件；常驻注入器保证刷新后仍然生效。
 - **轻量注入**：常驻注入器用本地 HTTP + gzip + ETag 缓存运行时（约 231 KB 传输），页面刷新只重新执行一个小 loader，不再反复通过 CDP 发送整套 bundle；本地服务不可用时自动回退到内联 bundle。
-- **诊断与恢复**：面板内「运行状态」显示帧率、GPU、帧率上限、渲染缓冲、贴图显存、draw call，以及缺失的场景贴图 / 被跳过的水面效果；`npm run doctor` 检查构建、素材、CDP 和注入状态；`npm run restore` 一键撤销背景并清理配置。
-- **手动检查更新**：系统分区显示当前版本，点「检查更新」才访问 GitHub Releases；默认不联网、不后台轮询。
+- **诊断与恢复**：面板内「运行状态」显示帧率、GPU、帧率上限、渲染缓冲、贴图显存、draw call，以及缺失的场景贴图 / 被跳过的水面效果，并支持「复制诊断信息」；`npm run doctor` 检查构建、素材、CDP 和注入状态；`npm run doctor -- --memory` 会采样常驻注入器 30 秒，报告 RSS / heap 增长；`npm run restore` 一键撤销背景并清理配置。
+- **一键更新**：系统分区点「检查更新」才访问 GitHub Releases；发现新版本可直接「下载并应用」——下载、SHA-256 校验、解压、覆盖本地文件并自动重新注入。默认不联网、不后台轮询。
+- **便携运行**：Release 的便携包内置 `runtime/node.exe`，目标机器没装 Node 也能双击 `start.cmd` 直接运行。
 - **无素材可跑**：没有背景图和模型时自动使用程序化背景 + 水晶占位模型。
 - **零后端**：所有资源本地加载，不上传、不联网、无遥测。
 
@@ -51,7 +52,7 @@ Nuvio 是项目的新名字（原代号 Codex Dynamic Background）。改名只�
 
 | 项目 | 要求 |
 | --- | --- |
-| Node.js | >= 22 |
+| Node.js | >= 22（源码运行 / 构建需要；便携包已内置 `runtime/node.exe`） |
 | Codex Desktop | Electron 版（Windows 为主，macOS/Linux 脚本为实验性） |
 | 浏览器 | 支持 WebGL2 的 Chromium |
 | 操作系统 | Windows 10/11（主支持）；macOS / Linux 可跑预览，注入路径需自行调整 |
@@ -316,6 +317,7 @@ npm run build     # 预览站点
 npm run embed     # 注入 bundle
 npm run size      # 查看运行时 raw / gzip 体积
 npm run sign      # 可选：用 signtool 给便携包签名（需 NUVIO_SIGN_CERT）
+npm run doctor -- --memory   # 采样常驻注入器 30 秒，检查 RSS/heap 是否有泄漏
 ```
 
 注入 bundle 约 836 KB（gzip 后约 231 KB）。常驻注入器默认走本地 HTTP 缓存，
@@ -605,7 +607,8 @@ Tripo 导出的 GLB 通常可以直读。建议导出时：
 - 只有手动点击「检查更新」时才会访问 GitHub Releases API；有本地注入器时请求由注入器代发，并缓存 10 分钟。不点就不联网。
 - 素材只从本地目录读取，不会上传。
 - 注入脚本通过 CDP 下发，不写入 Codex 安装目录。
-- 恢复控制端口只监听 `127.0.0.1`，使用每次注入随机生成的 token；状态文件 `.cxd-inject.json` 已被 `.gitignore` 忽略。
+- 控制端口只监听 `127.0.0.1`，使用每次注入随机生成的 token；CORS 只对 Codex 渲染进程和本地预览站放行，`/status` 拒绝未知网页来源；状态文件 `.cxd-inject.json` 已被 `.gitignore` 忽略。
+- 一键更新只从本仓库的 GitHub Release 下载 zip，并校验发布元数据里的 SHA-256；校验失败会中止，不会解压或覆盖文件。
 
 ## 贡献
 

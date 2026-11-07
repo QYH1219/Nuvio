@@ -49,6 +49,7 @@ export class BackgroundEngine {
     this.modelEnabled = true;
     this.disposed = false;
     this.webFrame = null;
+    this._webSuspended = false;
     this.contextLost = false;
     this._restoreAttempts = 0;
     this._restoreTimer = 0;
@@ -120,9 +121,11 @@ export class BackgroundEngine {
       this.visible = !hidden;
       if (hidden) {
         this._suspendVideo();
+        this._suspendWeb();
         this._cancel();
       } else {
         this._resumeVideo();
+        this._resumeWeb();
         this._last = 0;
         this._lastRender = 0;
         this._needsRepaint = true;
@@ -135,12 +138,16 @@ export class BackgroundEngine {
         // Pause the element too; a VideoTexture keeps decoding frames even
         // when the render loop is cancelled.
         this._suspendVideo();
+        this._suspendWeb();
         this._cancel();
       }
     };
     this._onFocus = () => {
       this.focused = true;
-      if (!document.hidden) this._resumeVideo();
+      if (!document.hidden) {
+        this._resumeVideo();
+        this._resumeWeb();
+      }
       this._last = 0;
       this._lastRender = 0;
       this._needsRepaint = true;
@@ -445,6 +452,14 @@ export class BackgroundEngine {
     frame.src = url;
     this.container.appendChild(frame);
     this.webFrame = frame;
+    // A wallpaper page can run its own rAF loop forever. Browsers stop
+    // compositing an invisible iframe, so hide it whenever the window is
+    // hidden or unfocused instead of letting an off-screen WebGL wallpaper
+    // keep the GPU hot.
+    if (!this.visible) {
+      this._webSuspended = true;
+      frame.style.visibility = 'hidden';
+    }
     // The WebGL canvas would paint over the iframe; hide it while web mode is
     // active. It is restored by disposeBackgroundTexture().
     this.canvas.style.visibility = 'hidden';
@@ -471,6 +486,7 @@ export class BackgroundEngine {
         /* ignore */
       }
       this.webFrame = null;
+      this._webSuspended = false;
       this.canvas.style.visibility = '';
     }
     if (this.backgroundVideo) {
@@ -513,6 +529,21 @@ export class BackgroundEngine {
     this._videoSuspended = false;
     if (!video || !video.paused) return;
     video.play?.().catch(() => {});
+  }
+
+  /** Freeze a web wallpaper without unloading it (reload would flash). */
+  _suspendWeb() {
+    const frame = this.webFrame;
+    if (!frame || this._webSuspended) return;
+    this._webSuspended = true;
+    frame.style.visibility = 'hidden';
+  }
+
+  _resumeWeb() {
+    const frame = this.webFrame;
+    if (!frame || !this._webSuspended) return;
+    this._webSuspended = false;
+    frame.style.visibility = '';
   }
 
   /* ---------------------------------------------------------------- */
@@ -638,7 +669,10 @@ export class BackgroundEngine {
     // window.devicePixelRatio: on a 1x display every tier would collapse to the
     // same buffer size, so "balanced"/"high" would only change the frame cap
     // and the picture would never actually get sharper.
-    const dpr = Math.max(1, Number(tier.dpr) || 1);
+    // 2x is the practical ceiling: 3x retina buffers triple the fragment cost
+    // for a wallpaper that sits behind a blurred UI, and were the main reason
+    // laptops dropped frames on the "high" tier.
+    const dpr = Math.min(2, Math.max(1, Number(tier.dpr) || 1));
     this.renderer.setPixelRatio(dpr);
     this.pixelRatio = dpr;
     this._needsRepaint = true;

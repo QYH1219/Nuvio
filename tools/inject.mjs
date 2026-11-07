@@ -1,12 +1,14 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   appendFileSync,
   closeSync,
+  copyFileSync,
   createReadStream,
   existsSync,
   mkdirSync,
   openSync,
   readFileSync,
+  rmSync,
   statSync,
   unlinkSync,
   writeFileSync,
@@ -27,6 +29,7 @@ import {
 import { getAutostartStatus, setAutostart } from './autostart.mjs';
 import { selectTargetOrNull, waitForPageTarget } from './target-score.mjs';
 import { findEntry } from './workshop-scan.mjs';
+import { readZip } from './zip.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const DEFAULT_BUNDLE = join(ROOT, 'dist-embed', 'codex-dynamic-bg.iife.js');
@@ -66,6 +69,14 @@ async function fetchLatestRelease() {
       name: String(data?.name || ''),
       html_url: String(data?.html_url || ''),
       published_at: String(data?.published_at || ''),
+      assets: Array.isArray(data?.assets)
+        ? data.assets.map((asset) => ({
+            name: String(asset?.name || ''),
+            size: Number(asset?.size) || 0,
+            url: String(asset?.browser_download_url || ''),
+            digest: String(asset?.digest || ''),
+          }))
+        : [],
     };
     if (!release.tag_name) throw new Error('发布信息里没有版本号');
     releaseCache = { at: Date.now(), data: release };
@@ -73,6 +84,101 @@ async function fetchLatestRelease() {
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * Download the portable release asset, verify it, unpack it, and copy the
+ * files over the running install. node.exe is the only file Windows keeps
+ * locked while Nuvio runs, so a locked runtime is reported instead of
+ * aborting the whole update.
+ */
+async function applyLatestUpdate() {
+  const release = await fetchLatestRelease();
+  const version = String(release.tag_name || '').replace(/^v/i, '');
+  if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error('发布信息里没有可识别的版本号');
+  const assets = release.assets || [];
+  const asset =
+    assets.find((item) => /\.zip$/i.test(item.name) && /(portable|win|nuvio)/i.test(item.name)) ||
+    assets.find((item) => /\.zip$/i.test(item.name));
+  if (!asset?.url) throw new Error('该版本没有可下载的 zip 包');
+  if (asset.size > 160 * 1024 * 1024) throw new Error('更新包异常偏大，已中止');
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 60000);
+  let buffer;
+  try {
+    const res = await fetch(asset.url, {
+      signal: controller.signal,
+      redirect: 'follow',
+      headers: { 'user-agent': 'Nuvio-Updater', accept: 'application/octet-stream' },
+    });
+    if (!res.ok) throw new Error(`下载失败：HTTP ${res.status}`);
+    buffer = Buffer.from(await res.arrayBuffer());
+  } finally {
+    clearTimeout(timer);
+  }
+  if (buffer.length > 160 * 1024 * 1024) throw new Error('更新包异常偏大，已中止');
+
+  const sha256 = createHash('sha256').update(buffer).digest('hex');
+  const expected = String(asset.digest || '').replace(/^sha256:/i, '');
+  if (expected && expected.toLowerCase() !== sha256) {
+    throw new Error('更新包校验失败（sha256 不匹配）');
+  }
+
+  const entries = readZip(buffer);
+  const updatesRoot = join(ROOT, '.nuvio', 'updates');
+  const target = join(updatesRoot, version);
+  if (!target.startsWith(updatesRoot)) throw new Error('非法更新路径');
+  rmSync(target, { recursive: true, force: true });
+  mkdirSync(target, { recursive: true });
+
+  const applied = [];
+  const skipped = [];
+  // Releases are packed as `nuvio-<version>/<path>`; strip that prefix so the
+  // extracted tree mirrors the install root.
+  const prefix = new RegExp(`^[^/]+/`);
+  const first = entries.find((entry) => entry.name.includes('/'));
+  const top = first ? first.name.split('/')[0] : '';
+  const stripTop = entries.every((entry) => !entry.name.includes('/') || entry.name.startsWith(`${top}/`));
+
+  for (const entry of entries) {
+    let name = String(entry.name || '').replace(/\\/g, '/');
+    if (!name || name.endsWith('/')) continue;
+    if (stripTop && name.startsWith(`${top}/`)) name = name.slice(top.length + 1);
+    if (!name || name.startsWith('/') || name.includes('..') || /^[a-z]:/i.test(name)) continue;
+    const dest = join(target, name);
+    if (!dest.startsWith(target)) continue;
+    mkdirSync(dirname(dest), { recursive: true });
+    writeFileSync(dest, entry.data);
+    // node.exe is locked by the currently running launcher; everything else
+    // (bundle, tools, docs) can be replaced in place.
+    if (name === 'runtime/node.exe') {
+      skipped.push(name);
+      continue;
+    }
+    try {
+      const installDest = join(ROOT, name);
+      mkdirSync(dirname(installDest), { recursive: true });
+      copyFileSync(dest, installDest);
+      applied.push(name);
+    } catch {
+      skipped.push(name);
+    }
+  }
+
+  writeFileSync(
+    join(target, 'update.json'),
+    `${JSON.stringify({ version, sha256, at: new Date().toISOString(), skipped }, null, 2)}\n`,
+  );
+
+  return {
+    version,
+    sha256,
+    files: applied.length,
+    skipped,
+    dir: target,
+    restart: skipped.length > 0,
+  };
 }
 
 const MIME = {
@@ -484,8 +590,35 @@ function previewFile(id) {
   return null;
 }
 
-function setCors(response) {
-  response.setHeader('Access-Control-Allow-Origin', '*');
+/**
+ * The control port is loopback-only, but without CORS/origin checks any page
+ * the user visits could read /status, flip wallpapers, or write config.
+ * Only the Codex renderer (custom protocol) and the local preview server are
+ * allowed; native tools such as start.mjs send no Origin at all.
+ */
+const CONTROL_ORIGINS = new Set([
+  'null',
+  'app://-',
+  'app://codex',
+  'http://127.0.0.1:5273',
+  'http://localhost:5273',
+]);
+
+function requestOrigin(request) {
+  return String(request.headers?.origin || '');
+}
+
+function originTrusted(request) {
+  const origin = requestOrigin(request);
+  return !origin || CONTROL_ORIGINS.has(origin);
+}
+
+function setCors(request, response) {
+  const origin = requestOrigin(request);
+  if (origin && CONTROL_ORIGINS.has(origin)) {
+    response.setHeader('Access-Control-Allow-Origin', origin);
+    response.setHeader('Vary', 'Origin');
+  }
   response.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, POST, OPTIONS');
   response.setHeader('Access-Control-Allow-Headers', 'content-type, x-cxd-token');
   response.setHeader('Access-Control-Max-Age', '600');
@@ -494,7 +627,7 @@ function setCors(response) {
 function startControlServer(options, token, hooks) {
   const server = createServer(async (request, response) => {
     const url = new URL(request.url || '/', 'http://127.0.0.1');
-    setCors(response);
+    setCors(request, response);
 
     const send = (status, payload) => {
       const body = `${JSON.stringify(payload)}\n`;
@@ -511,12 +644,23 @@ function startControlServer(options, token, hooks) {
     const authorized = Boolean(token) && provided === token;
 
     if (request.method === 'OPTIONS') {
+      if (!originTrusted(request)) {
+        response.writeHead(403);
+        response.end();
+        return;
+      }
       response.writeHead(204);
       response.end();
       return;
     }
 
     if (request.method === 'GET' && url.pathname === '/status') {
+      // Unauthenticated, but only reachable from the app itself or a local
+      // process. A random website must not learn the injector pid/port.
+      if (!authorized && !originTrusted(request)) {
+        send(403, { ok: false, error: 'untrusted origin' });
+        return;
+      }
       send(200, { ok: true, ...hooks.status() });
       return;
     }
@@ -551,6 +695,7 @@ function startControlServer(options, token, hooks) {
       url.pathname === '/reload' ||
       url.pathname === '/api/autostart' ||
       url.pathname === '/api/update/check' ||
+      url.pathname === '/api/update/apply' ||
       url.pathname.startsWith('/api/workshop/') ||
       url.pathname.startsWith('/api/library/');
     if (!isApi) {
@@ -618,6 +763,16 @@ function startControlServer(options, token, hooks) {
       if (url.pathname === '/api/autostart') {
         const enabled = Boolean(payload.enabled);
         send(200, { ok: true, autostart: setAutostart(enabled) });
+        return;
+      }
+      if (url.pathname === '/api/update/apply') {
+        const result = await applyLatestUpdate();
+        send(200, { ok: true, ...result });
+        if (result.files > 0) {
+          setTimeout(() => {
+            Promise.resolve(hooks.reload()).catch(() => {});
+          }, 250);
+        }
         return;
       }
       if (url.pathname === '/api/workshop/import') {
@@ -1186,7 +1341,18 @@ async function main() {
 
     if (!options.once) {
       controlServer = await startControlServer(options, controlToken, {
-        status: () => ({ ...controlStatus, controlPort: controlServer?.port || null }),
+        status: () => {
+          const mem = process.memoryUsage();
+          return {
+            ...controlStatus,
+            controlPort: controlServer?.port || null,
+            memory: {
+              rss: mem.rss,
+              heapUsed: mem.heapUsed,
+              external: mem.external,
+            },
+          };
+        },
         restore: (payload) => performRestore(payload),
         getConfig: () => getPageConfig(),
         applyConfig: (config) => applyPageConfig(config),

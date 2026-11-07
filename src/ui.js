@@ -1,5 +1,5 @@
 import { DEFAULTS, QUALITY, QUALITY_ORDER } from './config.js';
-import { getAutostart, hasWorkshopApi, setAutostart } from './workshop.js';
+import { controlRequest, getAutostart, hasWorkshopApi, setAutostart } from './workshop.js';
 import { createWorkshopSection } from './panel/workshop.js';
 import { checkForUpdates } from './update.js';
 
@@ -103,7 +103,15 @@ const SECTIONS = [
     controls: [
       { type: 'range', key: 'bloom', label: '辉光强度', min: 0, max: 2, step: 0.01, when: 'procedural' },
       { type: 'toggle', key: 'particles', label: '粒子', when: 'procedural' },
-      { type: 'range', key: 'grain', label: '颗粒质感', min: 0, max: 1.5, step: 0.01 },
+      {
+        type: 'range',
+        key: 'grain',
+        label: '颗粒质感',
+        min: 0,
+        max: 1.5,
+        step: 0.01,
+        when: 'procedural',
+      },
       { type: 'range', key: 'sceneShake', label: '场景抖动', min: 0, max: 2, step: 0.01, when: 'scene' },
       { type: 'range', key: 'sceneSway', label: '场景摇摆', min: 0, max: 2, step: 0.01, when: 'scene' },
       { type: 'range', key: 'sceneWater', label: '水面动效', min: 0, max: 2, step: 0.01, when: 'scene' },
@@ -590,6 +598,42 @@ export function createPanel(config, handlers = {}, options = {}) {
           link.className = 'cxd-update-link';
           link.textContent = '查看 Release';
           status.append(link);
+          if (hasWorkshopApi()) {
+            const apply = document.createElement('button');
+            apply.type = 'button';
+            apply.className = 'cxd-asset-btn cxd-update-apply';
+            apply.textContent = '下载并应用';
+            apply.addEventListener('click', async () => {
+              if (apply.disabled) return;
+              apply.disabled = true;
+              btn.disabled = true;
+              apply.textContent = '下载中…';
+              status.textContent = '正在下载更新包…';
+              try {
+                const payload = await controlRequest('/api/update/apply', {
+                  method: 'POST',
+                  body: JSON.stringify({}),
+                  signal: AbortSignal.timeout(90000),
+                });
+                if (!payload?.ok) throw new Error(payload?.error || '更新失败');
+                status.textContent = `已更新到 v${payload.version}（${payload.files} 个文件）。`;
+                if (payload.skipped?.length) {
+                  status.append(
+                    ` 有 ${payload.skipped.length} 个文件被占用，请重启 Nuvio 完成更新。`,
+                  );
+                } else {
+                  status.append(' 背景已自动重新注入。');
+                }
+              } catch (error) {
+                status.textContent = `更新失败：${error?.message || '网络不可用'}`;
+              } finally {
+                apply.disabled = false;
+                btn.disabled = false;
+                apply.textContent = '下载并应用';
+              }
+            });
+            status.append(apply);
+          }
         } else {
           status.textContent = `已是最新（v${result.current}）`;
         }
@@ -644,8 +688,84 @@ export function createPanel(config, handlers = {}, options = {}) {
       grid.append(name, value);
     });
     group.appendChild(grid);
+
+    // One-click report. Support threads otherwise turn into five messages of
+    // "what does the diagnostics panel say", and every field users forget is
+    // exactly the one that identifies the problem.
+    const actions = document.createElement('div');
+    actions.className = 'cxd-row cxd-diag-actions';
+    const copy = document.createElement('button');
+    copy.type = 'button';
+    copy.className = 'cxd-asset-btn';
+    copy.textContent = '复制诊断信息';
+    copy.addEventListener('click', async () => {
+      const text = diagnosticReport(rows);
+      try {
+        await navigator.clipboard.writeText(text);
+        copy.textContent = '已复制';
+      } catch {
+        // Clipboard API needs a secure context; fall back to a temporary
+        // textarea so the button still works inside the injected page.
+        const area = document.createElement('textarea');
+        area.value = text;
+        area.setAttribute('readonly', '');
+        area.style.position = 'fixed';
+        area.style.opacity = '0';
+        document.body.appendChild(area);
+        area.select();
+        let ok = false;
+        try {
+          ok = document.execCommand('copy');
+        } catch {
+          ok = false;
+        }
+        area.remove();
+        copy.textContent = ok ? '已复制' : '复制失败';
+      }
+      setTimeout(() => {
+        copy.textContent = '复制诊断信息';
+      }, 1800);
+    });
+    actions.appendChild(copy);
+    group.appendChild(actions);
+
     refs.diagnostics = { type: 'diagnostics', rows };
     return group;
+  }
+
+  function diagnosticReport(rows) {
+    const lines = [`Nuvio v${NUVIO_VERSION}`, `ua: ${navigator.userAgent}`];
+    const labels = {
+      fps: '帧率',
+      tier: '画质',
+      buffer: '缓冲',
+      textures: '贴图/显存',
+      draw: '绘制',
+      scene: '背景',
+      gpu: 'GPU',
+      cap: '帧率上限',
+      compat: '界面兼容',
+      warn: '缺失贴图',
+    };
+    Object.entries(labels).forEach(([key, label]) => {
+      const value = rows[key]?.textContent || '—';
+      lines.push(`${label}: ${value}`);
+    });
+    const stats = globalThis.__CXD_STATS__;
+    if (stats) {
+      lines.push(`autoDowngraded: ${Boolean(stats.autoDowngraded)}`);
+      lines.push(`quality: ${stats.tier} @ ${Number(stats.dpr || 1).toFixed(2)}x`);
+      const compat = stats.compat || {};
+      if (Array.isArray(compat.missing) && compat.missing.length) {
+        lines.push(`compat.missing: ${compat.missing.join(', ')}`);
+      }
+      if (Array.isArray(compat.fallback) && compat.fallback.length) {
+        lines.push(`compat.fallback: ${compat.fallback.join(', ')}`);
+      }
+      const missing = stats.sceneMissingTextures || [];
+      if (missing.length) lines.push(`scene.missing: ${missing.slice(0, 8).join(', ')}`);
+    }
+    return lines.join('\n');
   }
 
   function buildAssets() {

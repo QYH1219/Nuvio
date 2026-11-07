@@ -100,7 +100,7 @@ async function probeControl(port) {
 }
 
 function parseArgs(argv) {
-  const options = { port: 9222, help: false };
+  const options = { port: 9222, help: false, memory: false };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === '--port') {
@@ -108,6 +108,8 @@ function parseArgs(argv) {
       options.port = Number(argv[index]);
     } else if (arg === '--help' || arg === '-h') {
       options.help = true;
+    } else if (arg === '--memory') {
+      options.memory = true;
     } else {
       throw new Error(`unknown option: ${arg}`);
     }
@@ -123,11 +125,35 @@ function printHelp() {
 Nuvio doctor
 
 Usage:
-  npm run doctor -- [--port 9222]
+  npm run doctor -- [--port 9222] [--memory]
 
 Checks the local build, decoders, background assets, injection state and
-Chromium remote-debugging endpoint.
+Chromium remote-debugging endpoint. --memory samples the resident injector
+for 30s and reports heap growth (leak regression check).
 `);
+}
+
+const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
+
+async function sampleInjectorMemory(port, seconds = 30) {
+  const samples = [];
+  const deadline = Date.now() + seconds * 1000;
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/status`, {
+        signal: AbortSignal.timeout(1200),
+      });
+      if (res.ok) {
+        const payload = await res.json();
+        if (payload?.memory) samples.push(payload.memory);
+      }
+    } catch {
+      /* injector went away mid-sample */
+    }
+    if (Date.now() + 5000 > deadline) break;
+    await sleep(5000);
+  }
+  return samples;
 }
 
 async function probeCdp(port) {
@@ -227,9 +253,11 @@ async function main() {
     add('info', 'wallpaper 目录', files.join(', ') || '空');
   }
 
+  let memoryPort = 0;
   if (existsSync(STATE)) {
     try {
       const state = JSON.parse(readFileSync(STATE, 'utf8'));
+      if (Number(state.controlPort) > 0) memoryPort = Number(state.controlPort);
       add(
         'info',
         '上次注入',
@@ -304,6 +332,34 @@ async function main() {
     add(dev.ok ? 'info' : 'warn', '预览站', dev.ok ? 'http://127.0.0.1:5273/ 正在运行' : `HTTP ${dev.status}`);
   } catch {
     add('info', '预览站', '未运行（npm run dev）');
+  }
+
+  if (options.memory) {
+    if (!memoryPort) {
+      add('warn', '内存采样', '没有常驻注入器，先运行 npm start');
+    } else {
+      console.log(`\n[nuvio] sampling injector memory for 30s (control :${memoryPort}) ...`);
+      const samples = await sampleInjectorMemory(memoryPort);
+      if (samples.length < 2) {
+        add('warn', '内存采样', '采样点不足，注入器可能已退出');
+      } else {
+        const first = samples[0];
+        const last = samples[samples.length - 1];
+        const rssDelta = last.rss - first.rss;
+        const heapDelta = last.heapUsed - first.heapUsed;
+        const peak = samples.reduce((max, item) => Math.max(max, item.rss), 0);
+        const leaked = rssDelta > 40 * 1024 * 1024 || heapDelta > 25 * 1024 * 1024;
+        add(
+          leaked ? 'warn' : 'ok',
+          '内存采样',
+          `${samples.length} 点 · RSS ${formatBytes(first.rss)} → ${formatBytes(
+            last.rss,
+          )} (${rssDelta >= 0 ? '+' : ''}${formatBytes(Math.abs(rssDelta))}) · heap ${
+            heapDelta >= 0 ? '+' : '-'
+          }${formatBytes(Math.abs(heapDelta))} · peak ${formatBytes(peak)}`,
+        );
+      }
+    }
   }
 
   const icons = { ok: 'OK  ', warn: 'WARN', fail: 'FAIL', info: 'INFO' };

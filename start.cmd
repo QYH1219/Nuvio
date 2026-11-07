@@ -21,8 +21,13 @@ set "NUVIO_LOG=%TEMP%\nuvio-launch.log"
 
 if defined NUVIO_HIDDEN call :rotate_log
 
-where node >nul 2>nul
-if errorlevel 1 (
+rem Prefer the runtime shipped inside the portable zip. Fall back to a system
+rem Node install for source checkouts and developers.
+set "NODE_BIN=%~dp0runtime\node.exe"
+if exist "%NODE_BIN%" goto have_node
+set "NODE_BIN="
+for %%N in (node.exe) do set "NODE_BIN=%%~$PATH:N"
+if not defined NODE_BIN (
   if defined NUVIO_HIDDEN (
     echo [nuvio] Node.js 22 or newer is required.>>"%NUVIO_LOG%"
     exit /b 1
@@ -33,11 +38,12 @@ if errorlevel 1 (
   exit /b 1
 )
 
+:have_node
 if defined NUVIO_HIDDEN (
   echo [nuvio] %DATE% %TIME% launch>>"%NUVIO_LOG%"
-  node tools\start.mjs %* >>"%NUVIO_LOG%" 2>&1
+  "%NODE_BIN%" tools\start.mjs %* >>"%NUVIO_LOG%" 2>&1
 ) else (
-  node tools\start.mjs %*
+  "%NODE_BIN%" tools\start.mjs %*
 )
 set "CXD_EXIT=%ERRORLEVEL%"
 if not "%CXD_EXIT%"=="0" (

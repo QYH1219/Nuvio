@@ -2,6 +2,51 @@
 
 All notable changes to this project are documented here.
 
+## [0.6.5] - 2026-11-07
+
+### Added
+
+- **One-click update apply.** The panel can now download the portable release,
+  verify its SHA-256 digest, unpack it, replace the local files, and re-inject
+  the new bundle without a manual reinstall. Locked files (only `runtime/node.exe`
+  in practice) are reported instead of aborting the update.
+- **Portable Node runtime.** Release builds bundle `runtime/node.exe`, and
+  `start.cmd` / `restart.cmd` prefer it over a system Node install, so the ZIP
+  runs on a machine that has never installed Node.
+- **`npm run doctor -- --memory`.** Samples the resident injector for 30s and
+  reports RSS/heap growth as a leak regression check.
+- **Copy diagnostics.** The advanced panel can copy version, FPS/tier, GPU,
+  buffer size, texture cost, compatibility gaps and missing textures in one
+  click, instead of asking users to retype the panel.
+- Windows code-signing steps are documented for the optional Authenticode path
+  (`NUVIO_SIGN_CERT`); unsigned portable ZIPs remain the default.
+
+### Fixed
+
+- **Performance governor no longer over-downgrades.** It now waits through a
+  3s warm-up, compares the 95th-percentile frame time in a rolling window, and
+  scales the failure line to the tier's own target (`target × 0.6`). A 30 FPS
+  tier running at 24–26 FPS stays put; a genuinely struggling high tier still
+  steps down once.
+- **Control port hardening.** `127.0.0.1:5276` no longer answers arbitrary
+  websites with `Access-Control-Allow-Origin: *`. Only the Codex renderer and
+  the local preview origin get CORS headers, and `/status` rejects untrusted
+  origins while still allowing native tools that send no `Origin`.
+- **Compatibility probe covers 10 surfaces.** Shell, sidebar and composer stay
+  required; page surface, transcript, dialog, feature navigation, portal and
+  toast are reported separately. When a required selector disappears, a
+  geometry/opacity heuristic marks the painted rectangle and the wallpaper CSS
+  neutralises only its paint, so an upstream rename shows a badge instead of a
+  white slab.
+- **Web wallpapers stop rendering off-screen.** A web wallpaper iframe is
+  hidden on tab hide / window blur, which lets Chromium stop its rAF loop
+  instead of burning GPU behind Codex.
+- **High tier DPR is capped at 2×.** 3× retina buffers tripled fragment cost
+  for a wallpaper behind a blurred UI and were the main cause of dropped frames
+  on laptops.
+- The grain slider is now only shown for procedural backgrounds, where it
+  actually has an effect.
+
 ## [0.6.4] - 2026-11-06
 
 ### Fixed

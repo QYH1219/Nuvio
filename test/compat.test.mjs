@@ -16,7 +16,8 @@ test('compat probe reports ok when every known surface is present', () => {
   const found = new Set(COMPAT_SURFACES.flatMap((surface) => surface.selectors));
   const result = inspectCompat(fakeDoc(found));
   assert.equal(result.status, 'ok');
-  assert.equal(result.matched, COMPAT_SURFACES.length);
+  assert.equal(result.matched, result.total);
+  assert.equal(result.total, COMPAT_SURFACES.filter((surface) => surface.required).length);
   assert.deepEqual(result.missing, []);
 });
 
@@ -34,5 +35,6 @@ test('compat probe reports partial and names the missing surface', () => {
 test('compat probe degrades safely without a document', () => {
   const result = inspectCompat(null);
   assert.equal(result.status, 'unknown');
-  assert.equal(result.missing.length, COMPAT_SURFACES.length);
+  assert.equal(result.missing.length, COMPAT_SURFACES.filter((surface) => surface.required).length);
+  assert.deepEqual(result.fallback, []);
 });

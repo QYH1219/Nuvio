@@ -5,17 +5,32 @@ import { cheaperQuality, normalizeQuality, qualityFor } from './config.js';
  *
  * Rules:
  *  - only downgrades, never upgrades (an automatic upgrade would oscillate)
- *  - needs sustained low FPS, not one bad sample (window drag, GC, alt-tab)
+ *  - ignores the first few seconds: shader warm-up / first paint is always slow
+ *  - looks at the 95th percentile frame time in a rolling window, so a single
+ *    GC pause or window drag cannot trigger a downgrade
+ *  - scales the failure line to the tier's own target instead of a fixed 45
+ *    FPS, otherwise a 30 FPS tier looks permanently broken
  *  - one downgrade per session unless the caller resets the governor
  */
+const DEFAULT_WINDOW = 12;
+const DEFAULT_LOW_RATIO = 0.6;
+const PCT95_SLACK = 1.35;
+
 export class PerfGovernor {
   constructor(options = {}) {
     const threshold = Number(options.threshold);
     const samplesNeeded = Number(options.samplesNeeded);
     const warmupMs = Number(options.warmupMs);
+    const windowSize = Number(options.windowSize);
+    const lowRatio = Number(options.lowRatio);
     this.threshold = Number.isFinite(threshold) ? threshold : 45;
     this.samplesNeeded = Number.isFinite(samplesNeeded) && samplesNeeded > 0 ? samplesNeeded : 6;
-    this.warmupMs = Number.isFinite(warmupMs) ? Math.max(0, warmupMs) : 2500;
+    this.warmupMs = Number.isFinite(warmupMs) ? Math.max(0, warmupMs) : 3000;
+    this.windowSize = Number.isFinite(windowSize)
+      ? Math.min(60, Math.max(4, Math.round(windowSize)))
+      : DEFAULT_WINDOW;
+    this.lowRatio =
+      Number.isFinite(lowRatio) && lowRatio > 0 && lowRatio < 1 ? lowRatio : DEFAULT_LOW_RATIO;
     this.onDowngrade = options.onDowngrade || (() => {});
     this.reset();
   }
@@ -26,6 +41,15 @@ export class PerfGovernor {
     this.low = 0;
     this.applied = false;
     this.lastFps = 0;
+    this.frameSamples = [];
+    this.lastDowngrade = null;
+    this.p95FrameMs = 0;
+  }
+
+  /** FPS below this line counts as a bad sample for the current tier. */
+  lowLine(tier) {
+    const target = qualityFor(tier).fps || 60;
+    return Math.min(this.threshold, target * this.lowRatio);
   }
 
   /**
@@ -41,24 +65,33 @@ export class PerfGovernor {
     if (!Number.isFinite(fps) || fps <= 0) return null;
 
     this.samples += 1;
-    // A 30 FPS tier can never reach the default 45 FPS threshold; scale the
-    // failure line to the tier's own target so "balanced" is not instantly
-    // treated as broken.
-    const target = qualityFor(tier).fps || 60;
-    const threshold = Math.min(this.threshold, target * 0.75);
-    if (fps < threshold) this.low += 1;
+    this.frameSamples.push(1000 / fps);
+    if (this.frameSamples.length > this.windowSize) this.frameSamples.shift();
+
+    const line = this.lowLine(tier);
+    if (fps < line) this.low += 1;
     else this.low = 0;
 
     if (this.samples < this.samplesNeeded) return null;
     if (this.low < this.samplesNeeded) return null;
 
-    const next = cheaperQuality(tier);
-    if (!next) {
-      this.applied = true;
+    // p95 frame time vs the budget of the failure line: reject a window where
+    // most frames are fine but one spike dragged the average down.
+    this.p95FrameMs = percentile(this.frameSamples, 0.95);
+    const budgetMs = 1000 / Math.max(1, line);
+    if (this.p95FrameMs <= budgetMs * PCT95_SLACK) {
+      this.low = 0;
       return null;
     }
+
+    const next = cheaperQuality(tier);
     this.applied = true;
-    this.onDowngrade(next, { from: normalizeQuality(tier), fps });
+    if (!next) {
+      this.lastDowngrade = null;
+      return null;
+    }
+    this.lastDowngrade = next;
+    this.onDowngrade(next, { from: normalizeQuality(tier), fps, p95: this.p95FrameMs });
     return next;
   }
 
@@ -68,9 +101,17 @@ export class PerfGovernor {
       tier: normalizeQuality(tier),
       label: preset.label,
       fps: this.lastFps,
-      downgraded: this.applied && this.low >= this.samplesNeeded,
+      p95FrameMs: Number(this.p95FrameMs.toFixed(1)),
+      downgraded: Boolean(this.lastDowngrade),
     };
   }
+}
+
+function percentile(values, ratio) {
+  if (!values.length) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const index = Math.min(sorted.length - 1, Math.max(0, Math.ceil(ratio * sorted.length) - 1));
+  return sorted[index];
 }
 
 function now() {

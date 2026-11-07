@@ -70,6 +70,14 @@ function collect() {
   for (const file of walk(join(ROOT, 'public', 'vendor'))) {
     files.push(relative(ROOT, file).replace(/\\/g, '/'));
   }
+  // Optional bundled runtime: release CI drops node.exe here so the portable
+  // zip runs on a machine that has never installed Node. It is skipped for
+  // local packs unless the folder exists.
+  if (existsSync(join(ROOT, 'runtime'))) {
+    for (const file of walk(join(ROOT, 'runtime'))) {
+      files.push(relative(ROOT, file).replace(/\\/g, '/'));
+    }
+  }
   return [...new Set(files)].filter((file) => existsSync(join(ROOT, file)));
 }
 

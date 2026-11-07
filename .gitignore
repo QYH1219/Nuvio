@@ -2,6 +2,7 @@ node_modules/
 dist/
 dist-embed/
 _ref/
+runtime/
 
 # Generated at install/build time by tools/sync-decoders.mjs
 public/vendor/
