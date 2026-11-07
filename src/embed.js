@@ -213,14 +213,32 @@ html[data-cxd-wallpaper="on"] body [class*="PageSurface"] {
   box-shadow: none !important;
 }
 
-/* Settings and utility pages share the shell but use a different surface. */
-html[data-cxd-background] body :is(
-  main.main-surface,
-  [data-app-shell-main-surface="default"]
-):has(
-  [data-app-shell-focus-area="main"] > div > div[class*="electron\:bg-surface"][class*="rounded-tl-lg"]
-) {
-  background-color: transparent !important;
+/* Settings, archived chats and other utility routes replace the thread
+   surface with an opaque electron:bg-surface sheet that covers the whole
+   artwork. Clearing its parent is not enough — the sheet itself has to become
+   the same frosted tint as the rest of the shell. */
+html[data-cxd-wallpaper="on"] body main [class*="electron:bg-surface"][class*="rounded-tl-lg"] {
+  background-color: var(--cxd-panel-tint, rgba(255, 255, 255, 0.16)) !important;
+  background-image: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* Inside those routes Codex stacks white rounded-2xl cards on the sheet.
+   They are the reason a settings/archive page still reads as a solid white
+   page even after the sheet is tinted. group/settings is the stable wrapper
+   Codex uses for every settings sub-route, including 已归档的聊天. */
+html[data-cxd-wallpaper="on"] body main [class*="group/settings"] [class*="rounded-2xl"][class*="border-default"] {
+  background-color: var(--cxd-panel-tint, rgba(255, 255, 255, 0.16)) !important;
+  background-image: none !important;
+}
+
+/* Settings sub-pages (plugins, skills, integrations) render a sticky page
+   header whose ::before is a solid white 77px band. It is not an element, so
+   the surface rules above never see it; without this the top of those pages
+   still cuts the artwork in half. */
+html[data-cxd-wallpaper="on"] body main [data-app-shell-inline-page-header] [data-sticky]::before {
+  background-color: var(--cxd-panel-tint, rgba(255, 255, 255, 0.16)) !important;
   background-image: none !important;
 }
 

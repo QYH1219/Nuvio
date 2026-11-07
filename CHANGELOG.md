@@ -6,6 +6,13 @@ All notable changes to this project are documented here.
 
 ### Fixed
 
+- Settings, archived chats and other utility routes no longer paint an opaque
+  surface sheet over the wallpaper. The route sheet and its `rounded-2xl`
+  cards now inherit the same frosted tint as the rest of the shell, so the
+  artwork stays visible across the whole page.
+- Sticky page headers on settings sub-pages (plugins, skills, integrations)
+  painted a solid white `::before` band that cut the wallpaper in half. The
+  band now uses the panel tint instead.
 - Video wallpapers now pause when Codex is hidden or unfocused, and resume on
   return. The element kept decoding frames even after the render loop was
   cancelled, which wasted GPU time in the background.
