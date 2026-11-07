@@ -31,6 +31,14 @@ All notable changes to this project are documented here.
   leaving the panel claiming a custom/dimmed look.
 - A Codex selector mismatch now shows a small warning dot on the gear instead
   of silently leaving parts of the host UI opaque.
+- Video thumbnails now clear their 1500 ms fallback timer as soon as the first
+  frame arrives, so switching wallpapers no longer leaves a timer behind.
+- A slow thumbnail capture from a replaced video can no longer overwrite the
+  preview of the wallpaper that replaced it.
+- Visibility and focus changes only resume a video that Nuvio itself paused, so
+  an external pause (media keys, OS, user code) is no longer overridden.
+- A video element that fails before it reaches the renderer is disposed instead
+  of being left loading in the background.
 - README bundle figures now match the shipped build (about 836 KB raw, 231 KB
   gzip).
 

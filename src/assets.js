@@ -354,15 +354,22 @@ export function captureVideoThumb(video, { timeoutMs = 1500 } = {}) {
   const draw = () => drawThumb(video, video.videoWidth, video.videoHeight);
   return new Promise((resolve) => {
     let settled = false;
+    let timer = 0;
     const finish = (value) => {
       if (settled) return;
       settled = true;
+      // The frame callback usually wins; leaving the fallback timer armed would
+      // keep one timer per wallpaper switch alive until it expires.
+      if (timer) clearTimeout(timer);
+      timer = 0;
       resolve(value);
     };
+    // Arm the fallback before registering the frame callback so a callback
+    // that fires synchronously still gets its timer cleared.
+    timer = setTimeout(() => finish(draw()), timeoutMs);
     if (typeof video.requestVideoFrameCallback === 'function') {
       video.requestVideoFrameCallback(() => finish(draw()));
     }
-    setTimeout(() => finish(draw()), timeoutMs);
   });
 }
 

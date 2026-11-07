@@ -347,6 +347,9 @@ export async function mount(host, options = {}) {
   let fallbackToken = 0;
   let fallbackTheme = config.theme;
   let saveTimer = 0;
+  // Monotonic id so a slow first-frame capture from a replaced video cannot
+  // overwrite the preview card of the wallpaper that replaced it.
+  let thumbSeq = 0;
 
   /**
    * Persist at most a few times per second. A range drag used to stringify the
@@ -484,6 +487,7 @@ export async function mount(host, options = {}) {
   }
 
   async function applyBackground(probed) {
+    const thumbToken = ++thumbSeq;
     assets.videoUrl = probed.videoUrl || null;
     assets.imageUrl = probed.imageUrl || null;
     assets.sceneUrl = probed.sceneUrl || null;
@@ -494,19 +498,24 @@ export async function mount(host, options = {}) {
     assets.previewDataUrl = '';
 
     if (probed.videoUrl) {
+      let video = null;
       try {
-        const video = await loadVideo(probed.videoUrl);
+        video = await loadVideo(probed.videoUrl);
         await engine.setBackgroundVideo(video);
         startVideo(video);
         assets.background = 'video';
         // The panel card wants a still; grabbing the first presented frame
         // must not delay startup, so it lands asynchronously.
         captureVideoThumb(video).then((url) => {
-          if (!url || assets.background !== 'video' || disposed) return;
+          if (!url || disposed) return;
+          if (thumbToken !== thumbSeq || assets.background !== 'video') return;
           assets.previewDataUrl = url;
           panelRef?.refreshAssets?.();
         });
+        // The engine owns the element from here on; only failures dispose it.
+        video = null;
       } catch (error) {
+        disposeMediaElement(video);
         console.warn('[codex-bg] background video failed, trying next source', error);
         assets.videoUrl = null;
       }

@@ -108,6 +108,9 @@ export class BackgroundEngine {
     this.envRT = null;
     this.pmrem = null;
     this._proceduralReady = null;
+    // Only set when the engine itself paused the element, so visibility/focus
+    // restore never overrides an external pause (media keys, OS, user code).
+    this._videoSuspended = false;
 
     this.applyQuality();
 
@@ -116,10 +119,10 @@ export class BackgroundEngine {
       const hidden = document.hidden;
       this.visible = !hidden;
       if (hidden) {
-        this.backgroundVideo?.pause();
+        this._suspendVideo();
         this._cancel();
       } else {
-        this.backgroundVideo?.play?.().catch(() => {});
+        this._resumeVideo();
         this._last = 0;
         this._lastRender = 0;
         this._needsRepaint = true;
@@ -131,13 +134,13 @@ export class BackgroundEngine {
       if (this.config.pauseWhenUnfocused) {
         // Pause the element too; a VideoTexture keeps decoding frames even
         // when the render loop is cancelled.
-        this.backgroundVideo?.pause();
+        this._suspendVideo();
         this._cancel();
       }
     };
     this._onFocus = () => {
       this.focused = true;
-      this.backgroundVideo?.play?.().catch(() => {});
+      if (!document.hidden) this._resumeVideo();
       this._last = 0;
       this._lastRender = 0;
       this._needsRepaint = true;
@@ -393,6 +396,7 @@ export class BackgroundEngine {
 
   async setBackgroundVideo(video) {
     this.disposeBackgroundTexture();
+    this._videoSuspended = false;
     const texture = new THREE.VideoTexture(video);
     texture.needsUpdate = true;
     this.background.setTexture(texture, video.videoWidth / video.videoHeight);
@@ -479,6 +483,7 @@ export class BackgroundEngine {
       }
       this.backgroundVideo = null;
     }
+    this._videoSuspended = false;
     if (this.backgroundTexture) {
       this.backgroundTexture.dispose();
       this.backgroundTexture = null;
@@ -487,6 +492,27 @@ export class BackgroundEngine {
       this.background.disposeSceneMaterial();
     }
     this.artworkKind = 'none';
+  }
+
+  /** Pause a playing video and remember that the engine owns the pause. */
+  _suspendVideo() {
+    const video = this.backgroundVideo;
+    if (!video || video.paused) return;
+    try {
+      video.pause();
+    } catch {
+      return;
+    }
+    this._videoSuspended = true;
+  }
+
+  /** Resume only if the pause came from this engine, not from outside. */
+  _resumeVideo() {
+    if (!this._videoSuspended) return;
+    const video = this.backgroundVideo;
+    this._videoSuspended = false;
+    if (!video || !video.paused) return;
+    video.play?.().catch(() => {});
   }
 
   /* ---------------------------------------------------------------- */
