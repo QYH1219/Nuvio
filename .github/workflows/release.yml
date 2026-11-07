@@ -37,8 +37,9 @@ jobs:
         run: |
           mkdir -p runtime
           curl -fsSL -o runtime/node.exe https://nodejs.org/dist/latest-v22.x/win-x64/node.exe
-          curl -fsSL -o runtime/LICENSE https://nodejs.org/dist/latest-v22.x/LICENSE
+          curl -fsSL -o runtime/LICENSE https://raw.githubusercontent.com/nodejs/node/v22.x/LICENSE
           test -s runtime/node.exe
+          test -s runtime/LICENSE
 
       - name: Package portable release
         run: npm run pack
