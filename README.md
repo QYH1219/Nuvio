@@ -457,10 +457,12 @@ npm run restore -- --reload     # 清理后刷新页面
 | `readability` | `balanced` | `wallpaper` / `clear` / `balanced` / `immersive` / `custom` |
 | `wallpaperMode` | `false` | 壁纸模式状态；选择图片/视频/场景时自动置为 `true`，清除后恢复主题 |
 | `quality` | `saver` | `saver` / `balanced` / `high`，只控制采样密度（1.0× / 1.25× / 1.5×）与帧率上限（30 / 30 / 60），不改变 `fit` 与构图；旧值 `low` / `medium` 自动映射 |
+| `powerSaver` | `true` | 智能省电总开关，派生 `autoQuality` / `lowEndAuto` / `idlePause` / `pauseWhenUnfocused` |
 | `autoQuality` | `true` | 持续低于当前档位目标帧率时自动降一档（每次会话最多一次，只降不升） |
 | `idlePause` | `true` | 图片 / 静态场景壁纸无交互时停帧，减少 GPU 占用 |
 | `pauseWhenUnfocused` | `true` | Codex 窗口失焦时暂停渲染循环，重新聚焦立即恢复 |
-| `fit` | `auto` | `auto` / `cover` / `contain` / `stretch`；图片、视频、scene 壁纸都生效 |
+| `fit` | `stretch` | `stretch` / `contain`；图片、视频、scene 壁纸都生效，`stretch` 不裁剪画面，旧值 `auto` / `cover` 自动迁移 |
+| `motionPreset` | `standard` | `off` / `light` / `standard`，派生 `motion` 与 `parallax` |
 | `motion` | `1` | 全局动态强度 |
 | `parallax` | `1` | 鼠标视差强度 |
 | `bloom` | `0.85` | Bloom 强度（仅程序化背景） |
@@ -475,10 +477,12 @@ npm run restore -- --reload     # 清理后刷新页面
 | `sceneWater` | `1` | 场景壁纸水波 / 涟漪 / 水流强度 |
 | `particles` | `true` | 粒子开关（仅程序化背景） |
 | `codexMock` | `true` | 预览站是否显示 mock 界面 |
+| `autoReadability` | `true` | 自动采样壁纸亮度与边缘密度，写入 `dim` / `surfaceOpacity`；开启时手动磨砂滑块禁用 |
+| `sceneBake` | `true` | 场景壁纸默认使用单 pass 轻量材质；关闭后回退完整效果 shader |
 | `surfaceOpacity` | `0.22` | Codex 面板磨砂强度基准（注入时实时生效，越高越不透明） |
 | `showPanel` | `false` | 设置面板是否展开（不写入导出 JSON） |
 
-`theme` / `readability` 只对程序化回退背景生效，0.3.0 面板不再暴露这两个选项。图片、视频或 scene 壁纸激活后由壁纸接管配色；用「外观」里的滑块直接调 `surfaceOpacity`、`dim`、`vignette`。
+`theme` / `readability` 只对程序化回退背景生效，设置面板不再暴露这两个选项。图片、视频或 scene 壁纸激活后由壁纸接管配色；用「外观」里的滑块直接调 `surfaceOpacity`、`dim`、`vignette`。
 
 ## 显存与纹理预算
 
@@ -598,7 +602,7 @@ Tripo 导出的 GLB 通常可以直读。建议导出时：
 - CDP 端口只应绑定在 `127.0.0.1`，不要暴露到局域网。
 - 高画质 + 4K 背景 + 大模型会明显吃 GPU；卡顿时按顺序处理：降 `quality`（采样密度）→ 开 `idlePause` / `pauseWhenUnfocused` → 把源图压到 2560/3840 → 最后才动模型。粒子与 Bloom 在壁纸模式下本来就不加载，关它们没有收益。
 - WebGL context lost 会自动停止帧循环并记录状态；`webglcontextrestored` 后重新上传纹理并恢复渲染，不需要重启 Codex。WebGL 创建失败时会保留兜底渐变背景，不会整窗变黑。
-- 低端 GPU 自动限帧只改帧率（最低封顶 24 FPS），不改 DPR、fit、Bloom 或粒子；如果你更在意动画流畅度，可以在「性能」里关掉它。
+- 智能省电只降帧率（最低 24 FPS）并跳过空闲渲染，不改 DPR、fit、Bloom 或粒子；如果你更在意动画流畅度，可以在「性能」里关掉它。
 - 场景壁纸缺 mask / normal / phase 贴图时，面板「缺失贴图」会列出角色和文件名；`waterripple` / `waterflow` 因缺贴图被跳过时也会显示原因。完整 URL 仍打印在控制台。
 - 背景发灰/看不清：注入时用 `--surface 0.15 --dim 0.05` 调低面板遮罩和压暗；面板越透明，背景越清晰，文字对比度会同步下降，按自己屏幕微调。
 - 设置面板导入的素材与预览站不是同一份：预览站、注入后的 Codex 各自使用自己的 IndexedDB；需要两边一致时分别导入，或用 `public/assets` / `npm run use`。

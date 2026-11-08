@@ -17,6 +17,10 @@ Nuvio is the project's new name (formerly Codex Dynamic Background). Only the pu
 
 > Real-environment demo: the NestWave wallpaper is stretched to cover the whole window without cropping. Original artwork by **小涂真纪-**; shown for interface demonstration only.
 
+![Settings panel with four sections over the full-window wallpaper](docs/screenshots/panel.jpg)
+
+> The panel is down to four sections and 12 controls: the workshop indexes itself, quality tiers never change framing, and the panel and composer always let the artwork show through.
+
 ---
 
 ## Features
@@ -26,13 +30,15 @@ Nuvio is the project's new name (formerly Codex Dynamic Background). Only the pu
 - **Scene effect replay**: automatic `scene.pkg` extraction, replaying `shake`, `foliagesway`, `waterwaves`, `waterripple`, and `waterflow` in the same order Wallpaper Engine applies them.
 - **Tripo / glTF models**: GLB and glTF loading with automatic centering and bounding-box scaling; Draco, Meshopt, and KTX2 supported.
 - **Motion**: model spin, mouse tilt, vignette, film grain, and click ripples. Bloom and particles only run on the procedural fallback; once a wallpaper is active they stay off so the artwork keeps its detail.
-- **Adjustable rendering**: quality tier, motion, parallax, bloom, grain, dim, model scale/position/spin, and UI frost strength.
+- **12 controls, four sections**: wallpaper, look, performance, system. Theme, vignette, bloom, grain, particles, scene sway/water/shake, model placement and JSON import/export still exist in the config and are still honoured by the renderer; they are simply not sliders anymore.
 - **Assets from the settings panel**: pick or drop images, videos, and single-file GLBs without touching a terminal. Files stay in local IndexedDB and survive reloads.
-- **Creative workshop**: scans Wallpaper Engine wallpapers already downloaded locally (`431960`), with preview cards, one-click import, apply, and delete. No network access and no automatic downloads.
+- **Creative workshop**: the injector indexes Wallpaper Engine wallpapers already downloaded locally (`431960`) on startup and watches every Steam library, so a new subscription appears on its own. No scan button, no network access and no automatic downloads.
 - **Current wallpaper identity**: the top of the panel shows the live wallpaper's thumbnail, title, and source (local file / workshop / project asset / procedural), so multiple imports never become ambiguous.
 - **Favorites and rotation**: star workshop cards (`☆` / `★`), filter with `★ 收藏`, and optionally rotate every N minutes. Rotation prefers favorites, otherwise uses imported wallpapers, starts disabled, and never replaces the current frame immediately.
 - **Local wallpaper library**: imported video/scene wallpapers live under `public/assets/library/<id>/`; `active.json` records the applied wallpaper and restores it after reloads.
-- **Four fill modes**: `auto` / `cover` / `contain` / `stretch` for images, videos, and scene wallpapers. `contain` shows the complete artwork (may letterbox); `stretch` fills the window without cropping.
+- **Two fill modes, no cropping**: `stretch` (default) fills the window without trimming the artwork; `contain` keeps the original aspect ratio with letterboxing. Legacy `auto` / `cover` values migrate to `stretch`.
+- **Baked scene wallpapers**: scene art plays through a single-pass lite material (one artwork texture, at most two amplitude masks, sine displacement and parallax). A typical scene drops from five textures to three; scenes without a mask fall back to the full shader.
+- **Automatic readability**: the wallpaper is sampled once on a 32×32 offscreen canvas (luminance, edge density, contrast) to choose background dim and panel frost, with hysteresis so sampling noise cannot rewrite the config.
 - **Lightweight quality tiers**: Saver / Balanced / High, with Saver as the default. Tiers only change sampling density and the FPS cap, never the framing. Sustained low FPS drops one tier, static wallpapers can stop rendering while idle, and rendering pauses when the window loses focus. Software rasterizers and old integrated GPUs are automatically capped at 24 FPS without changing sampling or composition.
 - **Desktop wallpaper mode**: picking an image, video, or scene wallpaper switches to the crisp desktop look and removes the extra blur/vignette overlay. Once artwork owns the screen, theme presets are no longer layered on top.
 - **Settings in injected mode**: a compact panel is available from the bottom-right gear or `G`. Sections collapse and reset individually; JSON export/import lives in the `⋯` menu (config only, no wallpaper files).
@@ -129,17 +135,18 @@ http://127.0.0.1:5273/shader-preview.html?t=4
 diff. Without a fixture the page shows setup instructions and leaves normal
 preview/injection untouched.
 
-The panel has five sections. Every section except Wallpaper collapses, and each section header has a `↺` button that resets only that section:
+The panel has four sections and 12 controls. Every section collapses, and each header has a `↺` button that resets only that section:
 
 | Section | Contents |
 | --- | --- |
-| Wallpaper | current wallpaper card, local files / drag-and-drop, creative workshop results, favorites filter, rotation |
-| Look | fill mode (auto / cover / contain / stretch), UI frost, background dim, vignette |
-| Performance | quality tier, automatic downgrade, idle pause, pause when unfocused, motion, parallax |
-| Advanced | bloom, particles (procedural only), grain, scene shake/sway/water, GLB placement, runtime diagnostics |
+| Wallpaper | current wallpaper card, local files / drag-and-drop, auto-indexed workshop list, favorites filter, rotation and interval |
+| Look | fill mode (stretch / contain), automatic readability, UI frost |
+| Performance | quality tier, smart power saver, one motion preset, scene baking, restore quality |
 | System | restore on login (writes only Startup\Nuvio.lnk), current version, manual update check |
 
-Themes and readability presets are no longer exposed: once a wallpaper is active it owns the palette, and layering a theme on top only muddies the artwork. Existing `theme` / `readability` values still apply to the procedural fallback. Inputs, textareas, and `contenteditable` elements do not trigger the `G` shortcut. Advanced starts collapsed.
+Themes and readability presets are no longer exposed: once a wallpaper is active it owns the palette, and layering a theme on top only muddies the artwork. Existing `theme` / `readability` values still apply to the procedural fallback. Inputs, textareas, and `contenteditable` elements do not trigger the `G` shortcut.
+
+`智能省电` replaces the old automatic-downgrade / low-end-cap / idle-pause / focus-pause switches and drives all four legacy keys at once. `动效` collapses motion and parallax into `off` / `light` / `standard`. `场景壁纸烘焙` switches a live scene between the lite and full material without a page reload.
 
 Quality tiers never change framing: all three share the same `fit` and UVs and only change the drawing-buffer sampling density (1.0× / 1.25× / 1.5×) and FPS cap (30 / 30 / 60). The old "zoom on higher tiers" bug came from dividing by the CSS size instead of `renderer.getDrawingBufferSize()`, which pushed the UV ceiling to 1.25 / 1.5.
 
@@ -208,10 +215,10 @@ See [docs/ASSETS.md](docs/ASSETS.md) for details.
 
 ## Creative workshop (locally downloaded wallpapers)
 
-0.3.0 adds a local Wallpaper Engine scanner. It only reads wallpapers that are **already downloaded**; it never contacts Steam, subscribes, or downloads anything.
+0.7.0 makes the local Wallpaper Engine index automatic. The injector warms the cache on startup, watches every `steamapps/workshop/content/431960` folder, and the panel polls a cheap `scannedAt` stamp every 15s, so a finished download shows up without pressing anything. It only reads wallpapers that are **already downloaded**; it never contacts Steam, subscribes, or downloads anything.
 
 ```bash
-npm run workshop                 # scan the local 431960 folder and list wallpapers
+npm run workshop                 # CLI: scan the local 431960 folder and list wallpapers
 npm run workshop -- --json       # machine-readable output
 npm run workshop -- --root "D:\SteamLibrary\steamapps\workshop\content\431960"
 ```
@@ -422,12 +429,16 @@ Stored in `localStorage` under `codex-dynamic-bg:v2`:
 | `readability` | `balanced` | `wallpaper` / `clear` / `balanced` / `immersive` / `custom` |
 | `wallpaperMode` | `false` | Derived wallpaper state; set automatically for image/video/scene backgrounds and cleared when the wallpaper is removed |
 | `quality` | `saver` | `saver` / `balanced` / `high`; sampling density 1.0× / 1.25× / 1.5× and FPS cap 30 / 30 / 60. Never changes `fit` or framing. Legacy `low` / `medium` are mapped |
-| `autoQuality` | `true` | Drops one tier after sustained low FPS (once per session, never upgrades automatically) |
-| `idlePause` | `true` | Stops rendering static image / scene wallpapers while idle |
-| `pauseWhenUnfocused` | `true` | Pauses the render loop while the Codex window is unfocused |
-| `fit` | `auto` | `auto` / `cover` / `contain` / `stretch`; applies to images, videos, and scene wallpapers |
-| `motion` | `1` | Global motion strength |
-| `parallax` | `1` | Mouse parallax |
+| `powerSaver` | `true` | One switch that derives `autoQuality`, `lowEndAuto`, `idlePause` and `pauseWhenUnfocused` |
+| `autoQuality` | `true` | Derived from `powerSaver`: drops one tier after sustained low FPS (once per session, never upgrades automatically) |
+| `idlePause` | `true` | Derived from `powerSaver`: stops rendering static image / scene wallpapers while idle |
+| `pauseWhenUnfocused` | `true` | Derived from `powerSaver`: pauses the render loop while the Codex window is unfocused |
+| `fit` | `stretch` | `stretch` / `contain`; applies to images, videos, and scene wallpapers. Legacy `auto` / `cover` migrate to `stretch` |
+| `motionPreset` | `standard` | `off` / `light` / `standard`; derives `motion` and `parallax` |
+| `motion` | `1` | Derived from `motionPreset`: global motion strength |
+| `parallax` | `1` | Derived from `motionPreset`: mouse parallax |
+| `autoReadability` | `true` | Samples the active artwork and writes `dim` / `surfaceOpacity`; the manual frost slider is disabled while on |
+| `sceneBake` | `true` | Lite single-pass scene material; `false` rebuilds the scene with the full effect shader |
 | `bloom` | `0.85` | Bloom strength (procedural fallback only) |
 | `grain` | `0.55` | Film grain |
 | `dim` | `0.12` | Background dimming |
@@ -460,7 +471,7 @@ Original size, upload size, and the downscale flag live in `texture.userData.nuv
 
 ```js
 // Runtime update (also saves to localStorage)
-cxdBg.setConfig({ bloom: 1.2, modelSpin: 0.6, quality: 'medium' });
+cxdBg.setConfig({ bloom: 1.2, modelSpin: 0.6, quality: 'balanced' });
 
 // Apply a theme, then the explicit values above it
 cxdBg.setConfig({ theme: 'cyber' });
@@ -551,7 +562,7 @@ A failed model load does not break the page. It falls back to the placeholder cr
 - Keep the CDP and control ports bound to `127.0.0.1`; never expose them to a LAN.
 - 4K artwork plus large models can be GPU-heavy. In order: lower `quality`, enable `idlePause` / `pauseWhenUnfocused`, downscale the source to 2560/3840, and only then shrink the model. Bloom and particles are already off in wallpaper mode, so toggling them saves nothing.
 - WebGL context loss stops the loop and records the state; `webglcontextrestored` re-uploads textures and resumes without restarting Codex. If WebGL creation fails outright, a CSS gradient fallback stays visible instead of a black window.
-- The low-end GPU cap changes only the frame rate (24 FPS maximum), never DPR, fit, Bloom, or particles. Turn off `低端 GPU 自动限帧` when you prefer smoother motion.
+- Smart power saving only lowers the frame rate (24 FPS floor) and skips idle work; it never changes DPR, `fit`, Bloom, or particles. Turn off `智能省电` when you prefer smoother motion.
 - Missing scene mask / normal / phase textures and skipped `waterripple` / `waterflow` stages appear as a readable reason in the runtime panel; full URLs stay in the console.
 - If the background looks washed out, inject with `--surface 0.15 --dim 0.05`, or choose the Clear readability preset in the panel. Lower panel opacity makes artwork clearer but reduces text contrast.
 - The preview site and injected Codex use separate IndexedDB stores. Import assets in each origin, or use `public/assets` / `npm run use` for a shared disk-based setup.
