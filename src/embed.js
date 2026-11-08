@@ -85,6 +85,22 @@ html[data-cxd-wallpaper="on"] body :is(
   background-image: none !important;
 }
 
+/* Current builds wrap the thread surface in a focus-area div inside <main>.
+   Both elements match the tint rule above, so the frost composites twice and
+   the main pane ends up lighter than the sidebar. Keep the tint on <main>. */
+html[data-cxd-wallpaper="on"] body main [data-app-shell-focus-area="main"] {
+  background-color: transparent !important;
+  background-image: none !important;
+}
+
+/* Codex draws a 1px divider between the sidebar and the thread surface. Once
+   both sides share the same frost it only reads as a stray hairline across
+   the artwork. A transparent border still reveals the dark root layer at
+   subpixel widths, so drop the border box entirely. */
+html[data-cxd-wallpaper="on"] body main {
+  border-left-width: 0 !important;
+}
+
 html[data-cxd-wallpaper="on"] body [data-app-shell-main-surface="default"] > div::before,
 html[data-cxd-wallpaper="on"] body [class*="WorkspaceContent"]::before {
   display: none !important;
