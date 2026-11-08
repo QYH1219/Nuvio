@@ -2,6 +2,29 @@
 
 All notable changes to this project are documented here.
 
+## [0.7.1] - 2026-11-08
+
+### Fixed
+
+- **Baked scenes are no longer upside down.** Baked scene material sampled
+  `PlaneGeometry`'s bottom-left UVs while scene textures are uploaded with
+  `flipY = false` (Wallpaper Engine stores them top-left first). The lite
+  shader now flips V once, so a baked wallpaper matches the full shader and the
+  source artwork exactly.
+- **Wallpaper no longer looks muddy or over-darkened.** Automatic readability
+  stopped over-dimming: `dim` now tops out at 0.28 and typically lands near
+  0.04, and panel frost lands near 0.15 instead of 0.27.
+- **Panel frost follows the host theme.** The shell tint was hardcoded to a
+  near-black scrim, which turned a light Codex theme into grey-on-grey with
+  unreadable text. Frost is now white on light themes and near-black on dark
+  themes, with the same alpha on the main pane and the sidebar.
+- **No pale seam at the main/sidebar boundary.** The nested focus-area wrapper
+  no longer composites the frost twice, and Codex's 0.667px dark left border on
+  `<main>` is removed instead of left to outline the transparent pane.
+- **No first-frame dark flash on light themes.** The injected bootstrap seeded
+  `--cxd-ui-surface` with a dark value before `mount.js` ran; it now reads
+  `data-theme` and seeds the matching shade.
+
 ## [0.7.0] - 2026-11-08
 
 ### Added

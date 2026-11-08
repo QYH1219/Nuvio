@@ -378,8 +378,18 @@ function boot() {
 
   const html = document.documentElement;
   html.dataset.cxdBackground = 'on';
-  html.style.setProperty('--cxd-ui-surface', 'rgba(9, 13, 17, 0.22)');
-  html.style.setProperty('--cxd-ui-surface-strong', 'rgba(12, 17, 21, 0.3)');
+  // Seed the frost variables from the host theme so the first frame never
+  // flashes a dark scrim over a light UI. mount.js refines these with the
+  // user's surface-opacity slider once it boots.
+  const lightHost = html.dataset.theme !== 'dark';
+  html.style.setProperty(
+    '--cxd-ui-surface',
+    lightHost ? 'rgba(255, 255, 255, 0.16)' : 'rgba(9, 13, 17, 0.22)'
+  );
+  html.style.setProperty(
+    '--cxd-ui-surface-strong',
+    lightHost ? 'rgba(255, 255, 255, 0.22)' : 'rgba(12, 17, 21, 0.3)'
+  );
 
   let host = document.getElementById('cxd-bg-root');
   if (!host) {
