@@ -4,8 +4,8 @@ import { autoLook } from '../src/readability-auto.js';
 
 test('a mid-tone wallpaper lands on the hand-tuned defaults', () => {
   const look = autoLook({ luminance: 0.35, edgeDensity: 0.35, busy: 0.35 });
-  assert.ok(Math.abs(look.dim - 0.12) <= 0.02, `dim ${look.dim}`);
-  assert.ok(Math.abs(look.surfaceOpacity - 0.22) <= 0.03, `surface ${look.surfaceOpacity}`);
+  assert.ok(Math.abs(look.dim - 0.04) <= 0.02, `dim ${look.dim}`);
+  assert.ok(Math.abs(look.surfaceOpacity - 0.15) <= 0.03, `surface ${look.surfaceOpacity}`);
 });
 
 test('bright busy artwork gets more dim and more frost than dark calm art', () => {

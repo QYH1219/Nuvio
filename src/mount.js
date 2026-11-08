@@ -1169,18 +1169,32 @@ export async function mount(host, options = {}) {
     if (embed) {
       // Real Codex panels read these custom properties from CXD_CODEX_CSS.
       const doc = document.documentElement;
-      doc.style.setProperty('--cxd-ui-surface', `rgba(9, 13, 17, ${surface.toFixed(3)})`);
-      doc.style.setProperty(
-        '--cxd-ui-surface-strong',
-        `rgba(12, 17, 21, ${Math.min(1, surface * 1.35).toFixed(3)})`,
-      );
+      const light = doc.dataset.theme !== 'dark';
+      // The main surface must follow the theme. Painting a near-black film
+      // under a light theme leaves dark text on a dark backdrop: the panel
+      // reads as "dimmed" and labels lose contrast. Light themes get a white
+      // frost, dark themes keep the deep neutral.
+      const surfaceRgb = light ? '255, 255, 255' : '9, 13, 17';
+      const surfaceStrongRgb = light ? '255, 255, 255' : '12, 17, 21';
       // Light Codex themes use dark text, so a white frost keeps labels readable
       // while still letting the wallpaper colors through. Dark themes get the
       // opposite tint. The slider scales both.
-      const light = doc.dataset.theme !== 'dark';
       // Keep the frost light enough that the wallpaper reads as a wallpaper,
       // not as a white sheet. The slider still scales it up for readability.
       const alpha = clamp(0.04 + surface * 0.55, 0.03, 0.72);
+      // Main content and sidebar must share one frost strength, otherwise a
+      // visible brightness seam runs down the split between them.
+      const surfaceAlpha = light
+        ? alpha
+        : clamp(surface, 0.02, 1);
+      doc.style.setProperty(
+        '--cxd-ui-surface',
+        `rgba(${surfaceRgb}, ${surfaceAlpha.toFixed(3)})`,
+      );
+      doc.style.setProperty(
+        '--cxd-ui-surface-strong',
+        `rgba(${surfaceStrongRgb}, ${Math.min(1, surfaceAlpha * 1.35).toFixed(3)})`,
+      );
       doc.style.setProperty(
         '--cxd-panel-tint',
         light

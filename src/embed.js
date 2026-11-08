@@ -63,11 +63,15 @@ html[data-cxd-background] body :is(
 html[data-cxd-wallpaper="on"] {
   /* Light themes need a white frost, dark themes a dark one. mount.js
      overwrites this with the user's surface-opacity slider. */
+  --cxd-ui-surface: rgba(255, 255, 255, 0.16);
+  --cxd-ui-surface-strong: rgba(255, 255, 255, 0.22);
   --cxd-panel-tint: rgba(255, 255, 255, 0.16);
   --cxd-panel-hover: rgba(15, 23, 32, 0.07);
 }
 
 html[data-cxd-wallpaper="on"][data-theme="dark"] {
+  --cxd-ui-surface: rgba(9, 13, 17, 0.16);
+  --cxd-ui-surface-strong: rgba(12, 17, 21, 0.2);
   --cxd-panel-tint: rgba(9, 13, 17, 0.34);
   --cxd-panel-hover: rgba(255, 255, 255, 0.08);
 }

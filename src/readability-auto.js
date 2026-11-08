@@ -95,10 +95,11 @@ export function autoLook(analysis) {
   if (!analysis) return null;
   const luminance = clamp(Number(analysis.luminance) || 0, 0, 1);
   const busy = clamp(Number(analysis.busy ?? analysis.edgeDensity) || 0, 0, 1);
-  // Bright art needs a darker pass, busy art needs more panel frost. The
-  // constants land near the old hand-tuned defaults (dim 0.12, surface 0.22)
-  // for a typical mid-tone wallpaper, so nothing jumps on first run.
-  const dim = round2(clamp(0.06 + Math.max(0, luminance - 0.28) * 0.5 + busy * 0.06, 0.05, 0.45));
-  const surfaceOpacity = round2(clamp(0.12 + busy * 0.28 + Math.max(0, luminance - 0.55) * 0.45, 0.12, 0.6));
+  // Bright art needs a light darkening pass, busy art needs some panel frost.
+  // Keep both intentionally low: the wallpaper should still read as artwork,
+  // not as a dimmed backdrop. The manual slider remains available when a
+  // specific screen needs more contrast.
+  const dim = round2(clamp(0.03 + Math.max(0, luminance - 0.35) * 0.32 + busy * 0.04, 0.03, 0.28));
+  const surfaceOpacity = round2(clamp(0.08 + busy * 0.2 + Math.max(0, luminance - 0.6) * 0.3, 0.08, 0.42));
   return { dim, surfaceOpacity };
 }

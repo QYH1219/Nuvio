@@ -664,7 +664,10 @@ export const sceneLiteFragment = /* glsl */ `
   }
 
   void main() {
-    vec2 sceneUv = vUv;
+    // We upload scene textures with flipY=false (Wallpaper Engine's top-left
+    // origin), while PlaneGeometry's UV origin is bottom-left. Flip here so the
+    // baked path matches the full shader's screen-space orientation.
+    vec2 sceneUv = vec2(vUv.x, 1.0 - vUv.y);
     if (uFitMode > 1.5) {
       sceneUv = containUv(sceneUv);
     } else if (uFitMode > 0.5) {
