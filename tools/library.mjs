@@ -381,6 +381,7 @@ export function listWorkshop({ force = false } = {}) {
     dirs: scan.libraries,
     entries,
     cached: scan.cached,
+    scannedAt: scan.scannedAt,
     note: scan.entries.length
       ? ''
       : '未找到已下载的壁纸：先在 Wallpaper Engine 里订阅并下载。',

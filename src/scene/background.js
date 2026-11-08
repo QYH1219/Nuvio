@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { backgroundVertex, backgroundFragment } from '../shaders.js';
-import { SceneWallpaperMaterial } from './wallpaper.js';
+import { createSceneMaterial } from './wallpaper.js';
 
 export class BackgroundLayer {
   constructor(scene, renderer, textureEdges = {}) {
@@ -57,7 +57,7 @@ export class BackgroundLayer {
   /** Replay a Wallpaper Engine scene effect chain (shake + foliage sway). */
   setSceneWallpaper(data) {
     this.disposeSceneMaterial();
-    this.sceneMaterial = new SceneWallpaperMaterial(data, this.renderer, this.textureEdges);
+    this.sceneMaterial = createSceneMaterial(data, this.renderer, this.textureEdges);
     this.mesh.material = this.sceneMaterial;
     this.mode = 'scene';
     this.aspect = data.image.width / data.image.height;

@@ -7,8 +7,10 @@ import {
   DEFAULTS,
   QUALITY,
   FIT_IDS,
+  MOTION_PRESETS,
   normalizeQuality,
   qualityFor,
+  applyDerived,
 } from './config.js';
 import {
   probeAssets,
@@ -44,6 +46,7 @@ import {
 import { createHud, createHints, createPanel, createMock } from './ui.js';
 import { nextRotationEntry } from './rotation.js';
 import { installCompatProbe } from './compat.js';
+import { analyzeArtwork, autoLook } from './readability-auto.js';
 
 const params = new URLSearchParams(location.search);
 
@@ -135,6 +138,11 @@ function sanitizeConfigPatch(input) {
     }
     if (key === 'fit') {
       if (!FIT_ID_SET.has(value)) return;
+      patch[key] = value;
+      return;
+    }
+    if (key === 'motionPreset') {
+      if (!MOTION_PRESETS[value]) return;
       patch[key] = value;
       return;
     }
@@ -317,8 +325,10 @@ export async function mount(host, options = {}) {
         applyReadability(config, patch.readability);
       }
       Object.assign(config, patch);
+      applyDerived(config);
       syncWallpaperMode({ applyLook: true });
       engine.setConfig(config);
+      applySceneBakeSetting();
       saveConfig(config);
       syncUI();
       refreshFallbackTexture();
@@ -328,6 +338,7 @@ export async function mount(host, options = {}) {
       Object.assign(config, resetConfig());
       syncWallpaperMode({ applyLook: true });
       engine.setConfig(config);
+      applySceneBakeSetting();
       saveConfig(config);
       syncUI();
       refreshFallbackTexture();
@@ -350,6 +361,52 @@ export async function mount(host, options = {}) {
   // Monotonic id so a slow first-frame capture from a replaced video cannot
   // overwrite the preview card of the wallpaper that replaced it.
   let thumbSeq = 0;
+  let autoReadTimer = 0;
+  let lastAutoReadability = Boolean(config.autoReadability);
+  // sceneBake decides which material factory runs, so flipping it needs a
+  // reload of the scene rather than a uniform write.
+  let lastSceneBake = config.sceneBake !== false;
+  // Last decoded artwork, so toggling "自动适配可读性" back on does not need a
+  // reload to sample the wallpaper that is already on screen.
+  let currentArtworkSource = null;
+
+  /**
+   * Sample the current artwork once and write the derived dim / surface values.
+   * `resolveSource` may be an element or a getter, because a video frame is only
+   * meaningful after playback started.
+   */
+  function scheduleAutoReadability(resolveSource, delay = 140) {
+    if (!config.autoReadability) return;
+    if (autoReadTimer) clearTimeout(autoReadTimer);
+    autoReadTimer = setTimeout(() => {
+      autoReadTimer = 0;
+      let source = null;
+      try {
+        source = typeof resolveSource === 'function' ? resolveSource() : resolveSource;
+      } catch {
+        source = null;
+      }
+      if (!source) return;
+      currentArtworkSource = source;
+      const analysis = analyzeArtwork(source);
+      if (!analysis) return;
+      const look = autoLook(analysis);
+      if (!look) return;
+      assets.readability = { ...analysis, ...look };
+      // Hysteresis: sampling noise must not rewrite the config on every switch.
+      const changed =
+        Math.abs((Number(config.dim) || 0) - look.dim) >= 0.02 ||
+        Math.abs((Number(config.surfaceOpacity) || 0) - look.surfaceOpacity) >= 0.02;
+      if (!changed) return;
+      config.dim = look.dim;
+      config.surfaceOpacity = look.surfaceOpacity;
+      engine.setConfig(config);
+      applyVisibility();
+      saveConfig(config);
+      panelRef?.sync();
+    }, delay);
+    autoReadTimer.unref?.();
+  }
 
   /**
    * Persist at most a few times per second. A range drag used to stringify the
@@ -512,6 +569,8 @@ export async function mount(host, options = {}) {
           assets.previewDataUrl = url;
           panelRef?.refreshAssets?.();
         });
+        // A video has no frame at load time; sample once playback starts.
+        scheduleAutoReadability(() => engine.backgroundVideo, 900);
         // The engine owns the element from here on; only failures dispose it.
         video = null;
       } catch (error) {
@@ -523,12 +582,15 @@ export async function mount(host, options = {}) {
 
     if (assets.background !== 'video' && (probed.sceneData || probed.sceneUrl)) {
       try {
-        const scene = await loadSceneWallpaper(probed.sceneUrl, probed.sceneData);
+        const scene = await loadSceneWallpaper(probed.sceneUrl, probed.sceneData, {
+          bake: config.sceneBake !== false,
+        });
         engine.setSceneWallpaper(scene);
         assets.background = 'scene';
-        assets.scene = scene.meta;
+        assets.scene = { ...(scene.meta || {}), baked: Boolean(scene.baked) };
         assets.sceneMissing = Array.isArray(scene.missingTextures) ? scene.missingTextures : [];
         assets.previewDataUrl = captureImageThumb(scene.image);
+        scheduleAutoReadability(scene.image);
       } catch (error) {
         console.warn('[codex-bg] scene wallpaper failed, trying next source', error);
         assets.sceneUrl = null;
@@ -551,6 +613,7 @@ export async function mount(host, options = {}) {
         const img = await loadImage(probed.imageUrl);
         await engine.setBackgroundImage(img);
         assets.background = 'image';
+        scheduleAutoReadability(img);
       } catch (error) {
         console.warn('[codex-bg] background decode failed', error);
         assets.imageUrl = null;
@@ -566,6 +629,32 @@ export async function mount(host, options = {}) {
 
     updateStatus();
     return assets.background;
+  }
+
+  /**
+   * Re-apply the active wallpaper when the scene bake toggle changes. The baked
+   * and full materials are different shader programs built inside
+   * loadSceneWallpaper, so engine.setConfig alone leaves the old material live.
+   * Only runs on an explicit user toggle, and images come from HTTP cache.
+   */
+  function applySceneBakeSetting() {
+    const next = config.sceneBake !== false;
+    if (next === lastSceneBake) return;
+    lastSceneBake = next;
+    if (assets.background !== 'scene' && !assets.sceneUrl) return;
+    queueAsset(async () => {
+      // A second flip while this reload is queued wins; skip the stale pass.
+      if ((config.sceneBake !== false) !== next) return;
+      const probed = await probeAssets();
+      await applyBackground(mergedAssets(probed));
+      syncWallpaperMode({ applyLook: true });
+      engine.setConfig(config);
+      engine.setFit(config.fit);
+      panelRef?.sync();
+      panelRef?.refreshAssets?.();
+    }).catch((error) => {
+      console.warn('[codex-bg] scene rebake failed', error);
+    });
   }
 
   async function applyModel(url, options = {}) {
@@ -905,6 +994,7 @@ export async function mount(host, options = {}) {
     config,
     {
       onChange: () => {
+        applyDerived(config);
         const tier = normalizeQuality(config.quality);
         if (tier !== lastQuality) {
           lastQuality = tier;
@@ -916,6 +1006,11 @@ export async function mount(host, options = {}) {
         // repaint per event is what made dragging feel sticky.
         engine.setConfig(config);
         engine.setFit(config.fit);
+        applySceneBakeSetting();
+        if (config.autoReadability && !lastAutoReadability && currentArtworkSource) {
+          scheduleAutoReadability(currentArtworkSource, 60);
+        }
+        lastAutoReadability = Boolean(config.autoReadability);
         scheduleSave();
         applyVisibility();
         if (config.theme !== fallbackTheme) {
@@ -930,6 +1025,7 @@ export async function mount(host, options = {}) {
         Object.assign(config, resetConfig(), { showPanel: wasOpen });
         syncWallpaperMode({ applyLook: true });
         engine.setConfig(config);
+        applySceneBakeSetting();
         saveConfig(config);
         panelRef.sync();
         applyVisibility();
@@ -946,9 +1042,11 @@ export async function mount(host, options = {}) {
         }
         Object.keys(config).forEach((key) => delete config[key]);
         Object.assign(config, next, patch, { showPanel: wasOpen });
+        applyDerived(config);
         if (embed) config.codexMock = false;
         syncWallpaperMode({ applyLook: true });
         engine.setConfig(config);
+        applySceneBakeSetting();
         saveConfig(config);
         panelRef.sync();
         applyVisibility();

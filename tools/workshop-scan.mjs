@@ -10,12 +10,15 @@
  *   node tools/workshop-scan.mjs --json
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, watch, writeFileSync } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const WORKSHOP_APP_ID = '431960';
-const CACHE_TTL_MS = 45_000;
+// The panel no longer has a scan button: the injector keeps the cache warm and
+// the desktop-side watcher invalidates it as soon as Steam finishes a download.
+// A short TTL keeps a stale cache from outliving a missed fs event.
+const CACHE_TTL_MS = 8_000;
 const MAX_PROJECT_BYTES = 512 * 1024;
 const CACHE_VERSION = 2;
 
@@ -123,6 +126,83 @@ export function steamLibraries() {
     }
   }
   return libraries;
+}
+
+/**
+ * Every `workshop/content/431960` folder that actually exists. Used by the
+ * watcher so a new Steam library only needs an injector restart, not a rescan
+ * of the whole disk.
+ */
+export function workshopRootsList() {
+  const roots = [];
+  const seen = new Set();
+  for (const library of steamLibraries()) {
+    const contentRoot = join(library, 'steamapps', 'workshop', 'content', WORKSHOP_APP_ID);
+    const key = pathKey(contentRoot);
+    if (seen.has(key) || !isDir(contentRoot)) continue;
+    seen.add(key);
+    roots.push(contentRoot);
+  }
+  return roots;
+}
+
+/**
+ * Watch every downloaded-wallpaper root and re-scan once changes settle.
+ * Wallpaper Engine writes a folder per item, so a non-recursive watch on the
+ * content root is enough and costs one handle per Steam library.
+ *
+ * @param {(result: ReturnType<typeof scanWorkshop>) => void} [callback]
+ * @returns {() => void} dispose
+ */
+export function watchWorkshop(callback) {
+  const watchers = [];
+  let timer = 0;
+  const schedule = () => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => {
+      timer = 0;
+      let result;
+      try {
+        result = scanWorkshop({ force: true });
+      } catch {
+        return;
+      }
+      try {
+        callback?.(result);
+      } catch {
+        /* a listener must not kill the watcher */
+      }
+    }, 1500);
+    timer.unref?.();
+  };
+
+  for (const dir of workshopRootsList()) {
+    try {
+      const watcher = watch(dir, { persistent: false }, (_event, name) => {
+        // Ignore unrelated noise (thumbnail caches live deeper, but Steam also
+        // touches the root); only react to item folders and root-level churn.
+        if (!name || /^\d{4,20}$/.test(String(name))) schedule();
+      });
+      watcher.on('error', () => {});
+      watcher.unref?.();
+      watchers.push(watcher);
+    } catch {
+      /* a locked or network drive is not fatal */
+    }
+  }
+
+  return () => {
+    if (timer) clearTimeout(timer);
+    timer = 0;
+    for (const watcher of watchers) {
+      try {
+        watcher.close();
+      } catch {
+        /* ignore */
+      }
+    }
+    watchers.length = 0;
+  };
 }
 
 function readProject(dir) {

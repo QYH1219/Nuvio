@@ -10,6 +10,9 @@ import {
 } from '../workshop.js';
 
 const POLL_MS = 800;
+// The injector watches the Steam library itself, so the list only needs a slow
+// safety poll for when Windows drops a filesystem event.
+const IDLE_POLL_MS = 15_000;
 
 /**
  * Wallpaper Engine card list.
@@ -29,7 +32,6 @@ export function createWorkshopSection(options = {}) {
   el.innerHTML = `
     <div class="cxd-workshop-head">
       <span class="cxd-workshop-title">创意工坊壁纸</span>
-      <button type="button" class="cxd-asset-btn" data-refresh>扫描</button>
     </div>
     <p class="cxd-asset-hint" data-hint></p>
     <div class="cxd-workshop-tools">
@@ -49,17 +51,17 @@ export function createWorkshopSection(options = {}) {
   const list = el.querySelector('[data-list]');
   const search = el.querySelector('[data-search]');
   const filter = el.querySelector('[data-filter]');
-  const refreshBtn = el.querySelector('[data-refresh]');
 
   let entries = [];
   let busy = '';
   let loaded = false;
   let pollTimer = 0;
+  let scannedAt = '';
+  let disposed = false;
   const activeJobs = new Map();
 
   if (!hasWorkshopApi()) {
     hint.textContent = '未连接本地壁纸服务。用 npm start 注入 Codex 后可用。';
-    refreshBtn.disabled = true;
     search.disabled = true;
     filter.disabled = true;
     return { el, refresh: async () => {} };
@@ -93,12 +95,12 @@ export function createWorkshopSection(options = {}) {
     const rows = visibleEntries();
     list.textContent = '';
     if (!loaded) {
-      list.innerHTML = '<div class="cxd-ws-empty">正在扫描…</div>';
+      list.innerHTML = '<div class="cxd-ws-empty">正在索引本机壁纸…</div>';
       return;
     }
     if (!entries.length) {
       list.innerHTML =
-        '<div class="cxd-ws-empty">没有找到已下载的壁纸。先去 Wallpaper Engine 订阅并下载一个。</div>';
+        '<div class="cxd-ws-empty">正在自动索引本机 Wallpaper Engine 壁纸…<br>在创意工坊订阅并下载后会自动出现在这里，不需要手动扫描。</div>';
       return;
     }
     if (!rows.length) {
@@ -176,26 +178,47 @@ export function createWorkshopSection(options = {}) {
     list.appendChild(frag);
   }
 
-  async function refresh() {
+  function applyPayload(payload) {
+    entries = Array.isArray(payload.entries) ? payload.entries : [];
+    scannedAt = payload.scannedAt || scannedAt;
+    loaded = true;
+    hint.textContent = payload.dirs?.length
+      ? `已自动索引 ${payload.dirs.length} 个 Steam 库，共 ${entries.length} 个已下载壁纸。`
+      : '未找到 Steam 库。确认 Wallpaper Engine 已安装并至少下载过一个壁纸。';
+    const note = payload.note;
+    if (note && !payload.dirs?.length) hint.textContent = note;
+  }
+
+  async function refresh(force = true) {
     if (busy) return;
-    refreshBtn.disabled = true;
     try {
-      const payload = await listWorkshop();
-      entries = Array.isArray(payload.entries) ? payload.entries : [];
-      loaded = true;
-      hint.textContent = payload.dirs?.length
-        ? `已扫描 ${payload.dirs.length} 个 Steam 库，共 ${entries.length} 个已下载壁纸。`
-        : '未找到 Steam 库。确认 Wallpaper Engine 已安装并至少下载过一个壁纸。';
-      const note = payload.note;
-      if (note) hint.textContent += ` ${note}`;
+      applyPayload(await listWorkshop(force));
     } catch (error) {
       loaded = true;
       entries = [];
       hint.textContent = error.message || '扫描失败';
     } finally {
-      refreshBtn.disabled = false;
       render();
     }
+  }
+
+  function schedulePoll() {
+    if (disposed) return;
+    pollTimer = setTimeout(async () => {
+      pollTimer = 0;
+      try {
+        // Cached read: the injector watcher already refreshed the index.
+        const payload = await listWorkshop(false);
+        if (!busy && payload.scannedAt && payload.scannedAt !== scannedAt) {
+          applyPayload(payload);
+          render();
+        }
+      } catch {
+        /* the local service may be restarting; the next tick retries */
+      }
+      schedulePoll();
+    }, IDLE_POLL_MS);
+    pollTimer.unref?.();
   }
 
   async function use(entry) {
@@ -265,12 +288,15 @@ export function createWorkshopSection(options = {}) {
 
   search.addEventListener('input', render);
   filter.addEventListener('change', render);
-  refreshBtn.addEventListener('click', refresh);
+
+  refresh(true);
+  schedulePoll();
 
   return {
     el,
     refresh,
     dispose() {
+      disposed = true;
       if (pollTimer) clearTimeout(pollTimer);
       pollTimer = 0;
     },

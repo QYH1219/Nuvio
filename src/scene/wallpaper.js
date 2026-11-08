@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { sceneVertex, buildSceneShader } from '../shaders.js';
+import { sceneVertex, buildSceneShader, sceneLiteFragment } from '../shaders.js';
 import { ARTWORK_TEXTURE_EDGE, EFFECT_TEXTURE_EDGE } from '../texture.js';
 
 function num(value, fallback) {
@@ -319,4 +319,99 @@ export class SceneWallpaperMaterial extends THREE.ShaderMaterial {
     this.textures.forEach((texture) => texture.dispose());
     this.textures = [];
   }
+}
+
+/**
+ * Cheap replay of a scene wallpaper: one artwork texture, up to two amplitude
+ * masks, two sine displacements. Built from `data.lite`, which
+ * `loadSceneWallpaper` derives from the same scene.json the full material would
+ * have consumed, so switching baking off never needs another download.
+ */
+export class SceneLiteMaterial extends THREE.ShaderMaterial {
+  constructor(data, renderer, textureEdges = {}) {
+    const artworkEdge = Number(textureEdges.artwork) || ARTWORK_TEXTURE_EDGE;
+    const effectEdge = Number(textureEdges.effect) || EFFECT_TEXTURE_EDGE;
+    const image = data?.image;
+    if (!image) throw new Error('baked scene wallpaper: missing image');
+    const lite = data.lite && typeof data.lite === 'object' ? data.lite : {};
+    const masks = (Array.isArray(lite.masks) ? lite.masks : []).filter(Boolean).slice(0, 2);
+
+    const uniforms = {
+      uTex: { value: makeTexture(image, true, renderer, false, artworkEdge) },
+      uMaskA: { value: null },
+      uMaskB: { value: null },
+      uHasMaskA: { value: 0 },
+      uHasMaskB: { value: 0 },
+      uTime: { value: 0 },
+      uParallax: { value: 1 },
+      uDim: { value: 0.2 },
+      uScreenAspect: { value: 16 / 9 },
+      uImageAspect: { value: (image.width || 16) / (image.height || 9) },
+      uFitMode: { value: String(data.fit || 'cover').toLowerCase() === 'stretch' ? 1 : 0 },
+      uSway: { value: 1 },
+      uWater: { value: 1 },
+      uMouse: { value: new THREE.Vector2() },
+    };
+
+    const masksCreated = masks.map((mask) => makeTexture(mask, false, renderer, false, effectEdge));
+    if (masksCreated[0]) {
+      uniforms.uMaskA.value = masksCreated[0];
+      uniforms.uHasMaskA.value = 1;
+    }
+    if (masksCreated[1]) {
+      uniforms.uMaskB.value = masksCreated[1];
+      uniforms.uHasMaskB.value = 1;
+    }
+
+    super({
+      uniforms,
+      vertexShader: sceneVertex,
+      fragmentShader: sceneLiteFragment,
+      depthWrite: false,
+      depthTest: false,
+      toneMapped: false,
+    });
+    this.renderer = renderer;
+    this.textures = [uniforms.uTex.value, ...masksCreated];
+    this.imageAspect = (image.width || 16) / (image.height || 9);
+    this.effectTypes = Array.isArray(lite.effects) ? lite.effects.slice() : [];
+    this.missingTextures = Array.isArray(data.missingTextures)
+      ? data.missingTextures.map((entry) => ({ ...entry }))
+      : [];
+    this.skippedEffects = [];
+    this.baked = true;
+  }
+
+  resize(_camera, width, height, pixelRatio = 1) {
+    this.uniforms.uScreenAspect.value = width / height;
+    const buffer = this.renderer?.getDrawingBufferSize?.(new THREE.Vector2());
+    const scale = Number.isFinite(pixelRatio) && pixelRatio > 0 ? pixelRatio : 1;
+    this.uniforms.uResolution?.value?.set?.(
+      Math.max(1, buffer?.x || Math.round(width * scale)),
+      Math.max(1, buffer?.y || Math.round(height * scale)),
+    );
+  }
+
+  update(time, mouse, config) {
+    this.uniforms.uTime.value = time;
+    this.uniforms.uMouse.value.copy(mouse);
+    this.uniforms.uParallax.value = Number.isFinite(config.parallax) ? config.parallax : 1;
+    this.uniforms.uDim.value = Number.isFinite(config.dim) ? config.dim : 0.2;
+    const motion = Number.isFinite(config.motion) ? config.motion : 1;
+    const sway = Number.isFinite(config.sceneSway) ? config.sceneSway : 1;
+    const water = Number.isFinite(config.sceneWater) ? config.sceneWater : 1;
+    this.uniforms.uSway.value = sway * motion;
+    this.uniforms.uWater.value = water * motion;
+  }
+
+  disposeTextures() {
+    this.textures.forEach((texture) => texture.dispose());
+    this.textures = [];
+  }
+}
+
+export function createSceneMaterial(data, renderer, textureEdges = {}) {
+  return data?.baked
+    ? new SceneLiteMaterial(data, renderer, textureEdges)
+    : new SceneWallpaperMaterial(data, renderer, textureEdges);
 }

@@ -51,8 +51,8 @@ export function controlRequest(path, options = {}) {
   return request(path, options);
 }
 
-export function listWorkshop() {
-  return request('/api/workshop/list');
+export function listWorkshop(force = false) {
+  return request(`/api/workshop/list${force ? '?force=1' : ''}`);
 }
 
 export function importWorkshop(id) {

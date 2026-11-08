@@ -2,6 +2,45 @@
 
 All notable changes to this project are documented here.
 
+## [0.7.0] - 2026-11-08
+
+### Added
+
+- **Automatic workshop indexing.** The panel no longer has a scan button. The
+  injector warms the Wallpaper Engine cache on startup, watches
+  `steamapps/workshop/content/431960` on every Steam library, and invalidates
+  the cache as soon as Steam finishes a download. The list polls a cheap
+  `scannedAt` stamp every 15s, so a new subscription shows up on its own.
+- **Baked scene wallpapers.** Scene art now plays through a single-pass lite
+  material: one artwork texture, at most two amplitude masks, sine
+  displacement, parallax and the same fit/letterbox math. Normal and phase maps
+  are skipped entirely, which drops the typical scene from five textures to
+  three and removes the per-pass shader cost. Scenes without any mask fall back
+  to the full shader, now loading its textures only in that case.
+- **Automatic readability.** The wallpaper is sampled once on a 32×32 offscreen
+  canvas (luminance, edge density, contrast) and the result drives background
+  dim and panel frost. Hysteresis keeps sampling noise from rewriting the
+  config, and re-enabling the switch re-samples the artwork already on screen.
+  The manual dim/frost sliders are gone from the panel.
+- **One motion preset.** `off` / `light` / `standard` replaces the motion and
+  parallax sliders. `applyDerived()` expands the preset (and the power-saver
+  switch) into the legacy keys the renderer still reads.
+
+### Changed
+
+- **Panel reduced from 30 controls to 12**, grouped into 壁纸 / 外观 / 性能 /
+  系统. Theme, vignette, bloom, grain, particles, scene sway/water/shake, model
+  placement and config import/export are no longer sliders; the values still
+  exist in the config and are still honoured by the renderer.
+- Wallpaper fitting is now `拉伸铺满` (default) or `完整留边`, so a wallpaper is
+  never cropped by default.
+- Workshop cache TTL 45s → 8s.
+
+### Fixed
+
+- Baking a scene that has no mask no longer drops its water/normal effects: the
+  full shader now loads normal and phase maps in that fallback path.
+
 ## [0.6.5] - 2026-11-07
 
 ### Added

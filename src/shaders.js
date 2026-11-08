@@ -608,6 +608,106 @@ ${flowBody || '    // no flow composites'}
 `;
 }
 
+/**
+ * Baked ("lite") scene pass.
+ *
+ * A full Wallpaper Engine scene replays every imported effect in one fragment
+ * shader: up to four warp functions, several textures and a lot of ALU per
+ * pixel, every frame. That is the single most expensive thing this project can
+ * put behind an editor.
+ *
+ * The bake keeps the artwork plus up to two amplitude masks and replaces the
+ * per-effect chain with two cheap mask-driven displacements. Visually it reads
+ * as the same swaying/rippling wallpaper at a fraction of the cost; the exact
+ * effect chain stays available when the user turns baking off.
+ */
+export const sceneLiteFragment = /* glsl */ `
+  precision highp float;
+
+  uniform sampler2D uTex;
+  uniform sampler2D uMaskA;
+  uniform sampler2D uMaskB;
+  uniform float uHasMaskA;
+  uniform float uHasMaskB;
+  uniform float uTime;
+  uniform float uParallax;
+  uniform float uDim;
+  uniform float uScreenAspect;
+  uniform float uImageAspect;
+  uniform float uFitMode;
+  uniform float uSway;
+  uniform float uWater;
+  uniform vec2 uMouse;
+
+  varying vec2 vUv;
+
+  vec2 coverUv(vec2 uv) {
+    float sa = uScreenAspect;
+    float ia = uImageAspect;
+    if (sa > ia) {
+      uv.y = (uv.y - 0.5) * (ia / sa) + 0.5;
+    } else {
+      uv.x = (uv.x - 0.5) * (sa / ia) + 0.5;
+    }
+    return uv;
+  }
+
+  vec2 containUv(vec2 uv) {
+    float sa = uScreenAspect;
+    float ia = uImageAspect;
+    if (sa > ia) {
+      uv.x = (uv.x - 0.5) * (sa / ia) + 0.5;
+    } else {
+      uv.y = (uv.y - 0.5) * (ia / sa) + 0.5;
+    }
+    return uv;
+  }
+
+  void main() {
+    vec2 sceneUv = vUv;
+    if (uFitMode > 1.5) {
+      sceneUv = containUv(sceneUv);
+    } else if (uFitMode > 0.5) {
+      sceneUv = clamp(sceneUv, 0.0, 1.0);
+    } else {
+      sceneUv = coverUv((sceneUv - 0.5) * 0.952 + 0.5);
+    }
+
+    sceneUv += uMouse * vec2(0.012, 0.0085) * uParallax;
+
+    float t = uTime;
+    vec2 disp = vec2(0.0);
+    if (uHasMaskA > 0.5 && uSway > 0.001) {
+      float amp = texture2D(uMaskA, clamp(sceneUv, 0.0, 1.0)).r;
+      disp += vec2(
+        sin(sceneUv.y * 16.0 + t * 0.8),
+        cos(sceneUv.x * 13.0 + t * 0.62)
+      ) * 0.0022 * uSway * amp;
+    }
+    if (uHasMaskB > 0.5 && uWater > 0.001) {
+      float amp = texture2D(uMaskB, clamp(sceneUv + vec2(t * 0.004, 0.0), 0.0, 1.0)).r;
+      disp += vec2(
+        sin(sceneUv.y * 44.0 + t * 1.7),
+        cos(sceneUv.x * 37.0 + t * 1.4)
+      ) * 0.0012 * uWater * amp;
+    }
+
+    vec3 col = texture2D(uTex, clamp(sceneUv + disp, 0.0, 1.0)).rgb;
+    col *= 1.0 - uDim * 0.62;
+
+    float inside = 1.0;
+    if (uFitMode > 1.5) {
+      inside = step(0.0, sceneUv.x) * step(sceneUv.x, 1.0) *
+               step(0.0, sceneUv.y) * step(sceneUv.y, 1.0);
+    }
+    col = mix(vec3(0.012, 0.020, 0.035), col, inside);
+
+    gl_FragColor = vec4(col, 1.0);
+    #include <tonemapping_fragment>
+    #include <colorspace_fragment>
+  }
+`;
+
 export const gradeShader = {
   uniforms: {
     tDiffuse: { value: null },

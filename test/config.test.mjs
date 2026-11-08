@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { DEFAULTS, clamp, loadConfig, resetConfig, saveConfig } from '../src/config.js';
+import {
+  DEFAULTS,
+  MOTION_PRESETS,
+  ROTATION_PRESETS,
+  applyDerived,
+  clamp,
+  loadConfig,
+  resetConfig,
+  saveConfig,
+} from '../src/config.js';
 
 class MemoryStorage {
   constructor() {
@@ -52,6 +61,29 @@ test('clamp keeps values inside the requested range', () => {
   assert.equal(clamp(0.4, 0, 1), 0.4);
 });
 
+test('applyDerived expands the motion preset and power saver into legacy keys', () => {
+  const config = { motionPreset: 'light', powerSaver: false, rotationMinutes: 30 };
+  applyDerived(config);
+  assert.equal(config.motion, MOTION_PRESETS.light.motion);
+  assert.equal(config.parallax, MOTION_PRESETS.light.parallax);
+  assert.equal(config.autoQuality, false);
+  assert.equal(config.lowEndAuto, false);
+  assert.equal(config.idlePause, false);
+  assert.equal(config.pauseWhenUnfocused, false);
+
+  const fallback = applyDerived({ motionPreset: 'missing' });
+  assert.equal(fallback.motion, MOTION_PRESETS.standard.motion);
+});
+
+test('rotation minutes snap to the segment options the panel actually offers', () => {
+  for (const minutes of [1, 37, 44, 75, 240, Number.NaN]) {
+    const config = applyDerived({ motionPreset: 'standard', rotationMinutes: minutes });
+    assert.ok(ROTATION_PRESETS.includes(config.rotationMinutes), String(minutes));
+  }
+  assert.equal(applyDerived({ motionPreset: 'standard', rotationMinutes: 44 }).rotationMinutes, 30);
+  assert.equal(applyDerived({ motionPreset: 'standard', rotationMinutes: 46 }).rotationMinutes, 60);
+});
+
 test('favoriteIds never leaks the shared default array', () => {
   localStorage.removeItem('codex-dynamic-bg:v2');
   const first = loadConfig();
@@ -77,13 +109,13 @@ test('favoriteIds are validated, deduplicated and capped', () => {
   assert.deepEqual(loadConfig().favoriteIds, []);
 });
 
-test('rotationMinutes is clamped to a usable window', () => {
+test('rotationMinutes is clamped then snapped to a panel preset', () => {
   saveConfig({ rotationMinutes: 0 });
-  assert.equal(loadConfig().rotationMinutes, 1);
+  assert.equal(loadConfig().rotationMinutes, ROTATION_PRESETS[0]);
   saveConfig({ rotationMinutes: 99999 });
-  assert.equal(loadConfig().rotationMinutes, 240);
+  assert.equal(loadConfig().rotationMinutes, ROTATION_PRESETS.at(-1));
   saveConfig({ rotationMinutes: 12.6 });
-  assert.equal(loadConfig().rotationMinutes, 13);
+  assert.equal(loadConfig().rotationMinutes, 15);
   saveConfig({ rotationMinutes: 'soon' });
   assert.equal(loadConfig().rotationMinutes, DEFAULTS.rotationMinutes);
 });

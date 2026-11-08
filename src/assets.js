@@ -161,12 +161,16 @@ function resolveAsset(name, sceneUrl) {
  * Images are deduplicated by URL, which matters because water scenes often
  * reuse one mask across several passes.
  */
-export async function loadSceneWallpaper(url, inlineData = null) {
+export async function loadSceneWallpaper(url, inlineData = null, options = {}) {
   const data = inlineData || (await loadSceneJson(url));
   const imageUrl = resolveAsset(data.image, url);
   const image = await loadImage(imageUrl);
 
   const pipeline = Array.isArray(data.pipeline) ? data.pipeline : [];
+  // Baked mode only needs the artwork plus one or two amplitude masks; normal
+  // and phase maps exist to feed the full multi-pass shader and would otherwise
+  // cost upload time and VRAM for something the lite pass never samples.
+  const bake = options.bake !== false;
   const cache = new Map();
   // A missing effect texture used to be a console.warn nobody reads. Keep the
   // failure and report it in the panel, otherwise a scene silently loses its
@@ -194,26 +198,59 @@ export async function loadSceneWallpaper(url, inlineData = null) {
     return cache.get(absolute);
   };
 
+  // Pass 1: masks only. The lite shader needs at most two of them, and whether
+  // any mask exists decides if baking is even possible.
   const resolved = [];
   for (const entry of pipeline) {
     if (!entry || !entry.type) continue;
     const refs = entry.textures || (entry.mask ? { mask: entry.mask } : {});
-    const [mask, normal, phase] = await Promise.all([
-      loadRef(refs.mask, 'mask'),
-      loadRef(refs.normal, 'normal'),
-      loadRef(refs.phase, 'phase'),
-    ]);
+    const mask = await loadRef(refs.mask, 'mask');
     resolved.push({
       type: entry.type,
       params: entry.params || {},
-      images: { mask, normal, phase },
+      refs,
+      images: { mask, normal: null, phase: null },
     });
+  }
+
+  // Pick the masks a lite pass can animate: the first two entries that carry a
+  // mask. Scenes without any mask (procedural-only) keep the full shader.
+  let lite = null;
+  if (bake) {
+    const masks = [];
+    const effects = [];
+    for (const entry of resolved) {
+      if (!entry.images?.mask) continue;
+      masks.push(entry.images.mask);
+      effects.push(entry.type);
+      if (masks.length >= 2) break;
+    }
+    if (masks.length) lite = { masks, effects };
+  }
+
+  // Pass 2: only when the full shader will actually run. Baking with zero masks
+  // has to fall back, so skipping normal/phase unconditionally used to silently
+  // drop water ripples from mask-less scenes.
+  if (!lite) {
+    await Promise.all(resolved.map(async (entry) => {
+      const [normal, phase] = await Promise.all([
+        loadRef(entry.refs.normal, 'normal'),
+        loadRef(entry.refs.phase, 'phase'),
+      ]);
+      entry.images.normal = normal;
+      entry.images.phase = phase;
+      delete entry.refs;
+    }));
+  } else {
+    for (const entry of resolved) delete entry.refs;
   }
 
   return {
     image,
     fit: data.fit || 'cover',
     pipeline: resolved,
+    baked: Boolean(lite),
+    lite,
     meta: data.source || {},
     camera: data.camera || {},
     missingTextures: [...missing.values()],

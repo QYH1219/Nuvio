@@ -1,4 +1,10 @@
-import { DEFAULTS, QUALITY, QUALITY_ORDER } from './config.js';
+import {
+  DEFAULTS,
+  MOTION_PRESETS,
+  QUALITY,
+  QUALITY_ORDER,
+  ROTATION_PRESETS,
+} from './config.js';
 import { controlRequest, getAutostart, hasWorkshopApi, setAutostart } from './workshop.js';
 import { createWorkshopSection } from './panel/workshop.js';
 import { checkForUpdates } from './update.js';
@@ -6,16 +12,15 @@ import { checkForUpdates } from './update.js';
 const NUVIO_VERSION = typeof __NUVIO_VERSION__ === 'undefined' ? 'dev' : __NUVIO_VERSION__;
 
 /**
- * Five sections, ordered by how often a user touches them:
- *   壁纸   — pick artwork (local file, Steam workshop, built-in)
- *   外观   — how the artwork fills the window, how readable the UI stays
- *   性能   — quality tier + the two switches that keep Codex smooth
- *   高级   — effect amounts and model placement
- *   系统   — login autostart (writes only Startup\Nuvio.lnk)
+ * 0.7 panel: 12 hands-on controls, grouped by the question a user is asking.
+ *   壁纸   — pick artwork; the Steam library indexes itself
+ *   外观   — framing + automatic readability
+ *   性能   — quality, power saver, one motion preset
+ *   系统   — login autostart, updater, diagnostics
  *
- * Theme presets and the readability presets are gone from the panel: once a
- * wallpaper is chosen it owns the palette, so picking a theme on top of it only
- * made the result muddy. The values still exist for the procedural fallback.
+ * Everything else (bloom, grain, vignette, particles, scene sway, model
+ * placement, config import/export) still exists in the config and the
+ * renderer, but it is not a slider anymore: a wallpaper should just work.
  */
 const SECTIONS = [
   {
@@ -24,22 +29,16 @@ const SECTIONS = [
     controls: [
       { type: 'assets' },
       { type: 'workshop' },
-      // Rotation needs the local workshop API, so these controls stay hidden
-      // on the static preview site instead of pretending to work.
       { type: 'toggle', key: 'rotationEnabled', label: '壁纸轮播', when: 'workshop' },
       {
-        type: 'range',
+        type: 'segment',
         key: 'rotationMinutes',
-        label: '轮播间隔（分钟）',
-        min: 1,
-        max: 240,
-        step: 1,
+        label: '轮播间隔',
         when: 'workshop',
-      },
-      {
-        type: 'note',
-        when: 'workshop',
-        text: '轮播优先使用带 ★ 的收藏；没有收藏时，在已导入的视频 / 场景壁纸之间轮换。',
+        options: ROTATION_PRESETS.map((minutes) => [
+          minutes,
+          minutes < 60 ? `${minutes} 分` : `${minutes / 60} 小时`,
+        ]),
       },
     ],
   },
@@ -53,24 +52,24 @@ const SECTIONS = [
         label: '填充方式',
         when: 'artwork',
         options: [
-          ['auto', '自动'],
-          ['cover', '裁剪铺满'],
-          ['contain', '完整显示'],
           ['stretch', '拉伸铺满'],
+          ['contain', '完整留边'],
         ],
       },
       {
         type: 'toggle',
-        key: 'webInteractive',
-        label: '允许网页壁纸交互（可能挡住点击）',
-        when: 'web',
+        key: 'autoReadability',
+        label: '自动适配可读性',
+        when: 'artwork',
       },
-      { type: 'range', key: 'surfaceOpacity', label: '界面磨砂强度', min: 0, max: 1, step: 0.01 },
-      { type: 'range', key: 'dim', label: '背景压暗', min: 0, max: 0.8, step: 0.01 },
-      // The vignette lives in the procedural post chain; wallpaper mode tears
-      // that chain down (scene.js setArtworkMode) and its shader has no
-      // vignette uniform, so the slider would change nothing.
-      { type: 'range', key: 'vignette', label: '暗角', min: 0, max: 1, step: 0.01, when: 'procedural' },
+      {
+        type: 'range',
+        key: 'surfaceOpacity',
+        label: '界面磨砂',
+        min: 0,
+        max: 1,
+        step: 0.01,
+      },
     ],
   },
   {
@@ -83,39 +82,24 @@ const SECTIONS = [
         label: '画质档位',
         options: QUALITY_ORDER.map((id) => [id, QUALITY[id].label]),
       },
-      { type: 'toggle', key: 'autoQuality', label: '卡顿时自动降档' },
-      { type: 'toggle', key: 'lowEndAuto', label: '低端 GPU 自动限帧' },
-      { type: 'toggle', key: 'idlePause', label: '静态壁纸停帧' },
-      { type: 'toggle', key: 'pauseWhenUnfocused', label: '窗口失焦时暂停' },
-      { type: 'range', key: 'motion', label: '动态强度', min: 0, max: 2, step: 0.01 },
-      { type: 'range', key: 'parallax', label: '鼠标视差', min: 0, max: 2, step: 0.01 },
+      { type: 'toggle', key: 'powerSaver', label: '智能省电' },
+      {
+        type: 'segment',
+        key: 'motionPreset',
+        label: '动效',
+        options: Object.entries(MOTION_PRESETS).map(([id, preset]) => [id, preset.label]),
+      },
+      {
+        type: 'toggle',
+        key: 'sceneBake',
+        label: '场景壁纸烘焙（更省 GPU）',
+        when: 'scene',
+      },
       {
         type: 'action',
         key: 'restoreQuality',
         label: '恢复自动降档前的画质',
       },
-      { type: 'toggle', key: 'showAdvanced', label: '显示高级设置（动效 / 诊断）' },
-    ],
-  },
-  {
-    id: 'advanced',
-    title: '高级',
-    controls: [
-      { type: 'range', key: 'bloom', label: '辉光强度', min: 0, max: 2, step: 0.01, when: 'procedural' },
-      { type: 'toggle', key: 'particles', label: '粒子', when: 'procedural' },
-      {
-        type: 'range',
-        key: 'grain',
-        label: '颗粒质感',
-        min: 0,
-        max: 1.5,
-        step: 0.01,
-        when: 'procedural',
-      },
-      { type: 'range', key: 'sceneShake', label: '场景抖动', min: 0, max: 2, step: 0.01, when: 'scene' },
-      { type: 'range', key: 'sceneSway', label: '场景摇摆', min: 0, max: 2, step: 0.01, when: 'scene' },
-      { type: 'range', key: 'sceneWater', label: '水面动效', min: 0, max: 2, step: 0.01, when: 'scene' },
-      { type: 'model' },
       { type: 'diagnostics' },
     ],
   },
@@ -245,7 +229,6 @@ export function createPanel(config, handlers = {}, options = {}) {
     const wrap = document.createElement('section');
     wrap.className = 'cxd-section';
     wrap.dataset.section = section.id;
-    wrap.hidden = section.id === 'advanced' && !config.showAdvanced;
     sectionEls[section.id] = wrap;
     // Sections collapse so the long "高级" block no longer pushes 系统 out of
     // reach. State is per session and starts collapsed for the block most
@@ -300,7 +283,7 @@ export function createPanel(config, handlers = {}, options = {}) {
       sectionTitle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
       sectionBody.hidden = collapsed;
     };
-    setCollapsed(section.id === 'advanced');
+    setCollapsed(false);
     sectionTitle.addEventListener('click', () => {
       setCollapsed(wrap.dataset.collapsed !== 'true');
     });
@@ -413,7 +396,9 @@ export function createPanel(config, handlers = {}, options = {}) {
           btn.dataset.value = value;
           btn.textContent = text;
           btn.addEventListener('click', () => {
-            config[control.key] = value;
+            // Presets such as rotationMinutes are numeric options; keep the
+            // number type instead of letting the DOM stringify the config.
+            config[control.key] = typeof value === 'number' ? value : String(value);
             sync();
             onChange(config);
           });
@@ -1071,7 +1056,7 @@ export function createPanel(config, handlers = {}, options = {}) {
       if (ref.type === 'assets' || ref.type === 'diagnostics') return;
       if (ref.type === 'segment') {
         [...ref.el.children].forEach((btn) => {
-          btn.classList.toggle('on', btn.dataset.value === config[key]);
+          btn.classList.toggle('on', String(btn.dataset.value) === String(config[key]));
         });
         if (ref.hintEl) {
           const tier = QUALITY[config[key]];
@@ -1090,9 +1075,11 @@ export function createPanel(config, handlers = {}, options = {}) {
       } else {
         ref.el.value = config[key];
         ref.value.textContent = fmt(config[key], ref.step);
+        // Auto readability owns the surface alpha; a manual slider would be
+        // overwritten on the next artwork change.
+        if (key === 'surfaceOpacity') ref.el.disabled = Boolean(config.autoReadability);
       }
     });
-    if (sectionEls.advanced) sectionEls.advanced.hidden = !config.showAdvanced;
   }
 
   function formatBytes(bytes) {

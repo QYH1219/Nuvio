@@ -28,7 +28,7 @@ import {
 } from './library.mjs';
 import { getAutostartStatus, setAutostart } from './autostart.mjs';
 import { selectTargetOrNull, waitForPageTarget } from './target-score.mjs';
-import { findEntry } from './workshop-scan.mjs';
+import { findEntry, scanWorkshop, watchWorkshop } from './workshop-scan.mjs';
 import { readZip } from './zip.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -713,7 +713,8 @@ function startControlServer(options, token, hooks) {
         return;
       }
       if (request.method === 'GET' && url.pathname === '/api/workshop/list') {
-        send(200, { ok: true, ...listWorkshop() });
+        const force = url.searchParams.get('force') === '1';
+        send(200, { ok: true, ...listWorkshop({ force }) });
         return;
       }
       if (request.method === 'GET' && url.pathname === '/api/autostart') {
@@ -1164,6 +1165,7 @@ async function main() {
 
   let cdp;
   let controlServer = null;
+  let workshopWatcher = null;
   let registered = null;
   let shuttingDown = false;
   let stateWritten = false;
@@ -1305,6 +1307,12 @@ async function main() {
 
   function closeResources() {
     try {
+      workshopWatcher?.();
+    } catch {
+      /* ignore */
+    }
+    workshopWatcher = null;
+    try {
       cdp?.close();
     } catch {
       /* ignore */
@@ -1361,6 +1369,22 @@ async function main() {
       });
       console.log(`[nuvio] control: http://127.0.0.1:${controlServer.port}/status`);
     }
+    // Warm the Wallpaper Engine index in the background (registry + library
+    // folders can take a moment on cold drives) and then keep it fresh while
+    // Steam finishes downloads. Nothing here touches the network.
+    const warmTimer = setTimeout(() => {
+      try {
+        scanWorkshop({});
+      } catch {
+        /* no Steam install is a normal state */
+      }
+      try {
+        workshopWatcher = watchWorkshop(() => {});
+      } catch {
+        /* watching is best effort */
+      }
+    }, 400);
+    warmTimer.unref?.();
     const controlBase = controlServer ? `http://127.0.0.1:${controlServer.port}` : '';
     await cdp.send('Page.enable');
     await cdp.send('Runtime.enable');
