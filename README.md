@@ -108,6 +108,17 @@ npm run shortcut -- --dry-run # 只看会写入什么，不创建文件
 - 注入成功后注入器转入后台隐藏运行，日志写到 `.nuvio/injector.log`；要停止它用 `npm run restore`。需要前台实时日志时用 `npm start -- --foreground`。
 - 只想注入、自己负责启动 Codex：`npm start -- --no-launch`；只重新构建：`npm start -- --build`。
 
+#### 托盘图标
+
+注入器是后台进程，没有窗口，所以任务栏里不会出现 Nuvio 的按钮——这是有意为之，不是漏了。运行状态改由系统托盘的一个图标表示：
+
+- 双击：重新加载背景。
+- 右键：重新加载背景 / 切换到 Codex / 打开日志 / 恢复并退出（保留壁纸设置）。
+- 注入器退出、崩溃或 `npm run restore` 之后，图标会在两秒内自动消失，不会留一个假的“运行中”。
+- Explorer 重启后图标会自动回来。
+
+图标用系统自带的 `csc.exe` 从 `tools/tray/tray.cs` 现场编译，缓存在 `.nuvio/nuvio-tray.exe`，仓库里不放二进制。不想要托盘就设 `NUVIO_NO_TRAY=1`。
+
 #### 壁纸包、便携版与开机自启
 
 ```powershell
@@ -609,6 +620,7 @@ Tripo 导出的 GLB 通常可以直读。建议导出时：
 - Linux / macOS 的 Codex 安装路径与进程名不同，`launch-codex.sh` 需要按实际环境改。
 - GLB 模型支持 KTX2 贴图；scene 壁纸里的 PNG 目前不会自动转成 KTX2。
 - Nuvio 只覆盖 Codex 窗口内部的一层背景，不替换 Windows 桌面壁纸，也不支持多显示器各自设置不同壁纸。
+- 任务栏里没有 Nuvio 按钮是正常的：注入器是无窗口后台进程，Windows 不会给无窗口进程登记任务栏按钮。需要可见入口就用托盘图标。
 
 ## 隐私
 

@@ -2,6 +2,27 @@
 
 All notable changes to this project are documented here.
 
+## [0.7.2] - 2026-11-09
+
+### Added
+
+- **Tray icon.** The injector is a detached process with no window, so Windows
+  never gives it a taskbar button — that is correct for a background process
+  but left users with no visible proof it was running. `tools/tray/tray.cs` is
+  a small Win32 notification-area helper: double-click reloads, right-click
+  offers 重新加载背景 / 切换到 Codex / 打开日志 / 恢复并退出（保留壁纸设置）.
+  It is compiled on demand with the in-box `csc.exe` into `.nuvio/`, so the
+  repository carries no binary; set `NUVIO_NO_TRAY=1` to skip it.
+- The icon exits within two seconds once the injector dies or the state file is
+  removed, and re-adds itself on Explorer's `TaskbarCreated` broadcast.
+- On Windows 11 the icon marks itself promoted once, so a new install does not
+  start buried in the overflow flyout.
+
+### Notes
+
+- No taskbar button is added. A button requires a real window, and a resident
+  window would cost more than the whole tray helper.
+
 ## [0.7.1] - 2026-11-08
 
 ### Fixed

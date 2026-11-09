@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline/promises';
 import { waitForPageTarget } from './target-score.mjs';
+import { ensureTray } from './tray.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const BUNDLE = join(ROOT, 'dist-embed', 'codex-dynamic-bg.iife.js');
@@ -12,6 +13,22 @@ const STATE_FILE = join(ROOT, '.cxd-inject.json');
 const LOG_FILE = join(ROOT, '.nuvio', 'injector.log');
 const IS_WIN = process.platform === 'win32';
 const VERSION = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).version;
+
+/**
+ * The injector runs without a window, so the notification-area icon is the
+ * only visible proof it is alive. NUVIO_NO_TRAY=1 skips it for users who do
+ * not want anything in the tray.
+ */
+function showTray() {
+  if (process.env.NUVIO_NO_TRAY === '1') return;
+  try {
+    if (ensureTray()) {
+      console.log('[nuvio] tray icon ready (右键可重载 / 退出)');
+    }
+  } catch (error) {
+    console.warn(`[nuvio] tray icon unavailable: ${error?.message || error}`);
+  }
+}
 
 function parseArgs(argv) {
   const options = {
@@ -482,12 +499,14 @@ async function main() {
     if (cdpAlive) {
       console.log(`[nuvio] already running (pid ${existing.pid}); the saved background is active.`);
       console.log('[nuvio] use --force to reload the injector.');
+      showTray();
       await checkForUpdate();
       return;
     }
     // Keep the injector: it reattaches by itself as soon as Codex is back with
     // the same debugging port. Killing it would only lose the saved session.
     console.log(`[nuvio] injector (pid ${existing.pid}) is waiting for Codex ...`);
+    showTray();
   }
 
   let cdpReady = await probeCdp(options.port);
@@ -568,6 +587,7 @@ async function main() {
     }
     console.log(`[nuvio] ready (pid ${status.pid}) · ${status.target || 'Codex window'}`);
     console.log('[nuvio] the background is resident; this window can close.');
+    showTray();
     await checkForUpdate();
     return;
   }

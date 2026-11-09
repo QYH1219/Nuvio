@@ -63,6 +63,7 @@ function collect() {
     'dist-embed/codex-dynamic-bg.iife.js',
     'tools/launch-codex.ps1',
     'tools/launch-codex.sh',
+    'tools/tray/tray.cs',
   ];
   for (const file of walk(join(ROOT, 'tools'))) {
     if (file.endsWith('.mjs')) files.push(relative(ROOT, file).replace(/\\/g, '/'));
