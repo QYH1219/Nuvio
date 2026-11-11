@@ -15,6 +15,7 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Net;
+using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -34,8 +35,11 @@ internal static class Program
     private const uint NIF_MESSAGE = 0x00000001;
     private const uint NIF_ICON = 0x00000002;
     private const uint NIF_TIP = 0x00000004;
+    private const uint NIF_INFO = 0x00000010;
     private const uint NIM_ADD = 0x00000000;
+    private const uint NIM_MODIFY = 0x00000001;
     private const uint NIM_DELETE = 0x00000002;
+    private const uint NIIF_INFO = 0x00000001;
 
     private const uint MF_STRING = 0x00000000;
     private const uint MF_SEPARATOR = 0x00000800;
@@ -47,6 +51,7 @@ internal static class Program
     private const int IDM_FOCUS = 2;
     private const int IDM_LOG = 3;
     private const int IDM_QUIT = 4;
+    private const int IDM_RESTORE = 5;
 
     private const uint IMAGE_ICON = 1;
     private const uint LR_LOADFROMFILE = 0x00000010;
@@ -65,6 +70,11 @@ internal static class Program
     private static string className = "NuvioTrayWindow";
     private static int missingStateTicks;
     private static int deadPidTicks;
+    private static int offlineTicks;
+    private static bool offline;
+    private static bool balloonShown;
+    private static DateTime lastRestoreClick = DateTime.MinValue;
+    private static DateTime lastConnectionCheck = DateTime.MinValue;
 
     // Environment.ProcessPath is .NET 6+; the in-box csc targets .NET Framework.
     private static string SelfPath
@@ -281,7 +291,8 @@ internal static class Program
                 }
                 if (mouse == WM_LBUTTONDBLCLK)
                 {
-                    Post("/reload", "{}");
+                    if (offline) Restore();
+                    else Post("/reload", "{}");
                     return IntPtr.Zero;
                 }
                 return IntPtr.Zero;
@@ -304,6 +315,12 @@ internal static class Program
         AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, "Nuvio · 动态背景");
         AppendMenuW(menu, MF_SEPARATOR, 0, null);
         AppendMenuW(menu, MF_STRING, IDM_RELOAD, "重新加载背景");
+        AppendMenuW(
+            menu,
+            MF_STRING | (offline ? 0 : MF_GRAYED),
+            IDM_RESTORE,
+            "恢复背景（重启 Codex）"
+        );
         AppendMenuW(menu, MF_STRING, IDM_FOCUS, "切换到 Codex");
         AppendMenuW(menu, MF_STRING, IDM_LOG, "打开日志");
         AppendMenuW(menu, MF_SEPARATOR, 0, null);
@@ -335,6 +352,9 @@ internal static class Program
                 break;
             case IDM_LOG:
                 OpenLog();
+                break;
+            case IDM_RESTORE:
+                Restore();
                 break;
             case IDM_QUIT:
                 Quit();
@@ -396,6 +416,190 @@ internal static class Program
         catch (IOException)
         {
             // Half-written state file during startup; try again next tick.
+        }
+        if (deadPidTicks == 0)
+        {
+            CheckConnection();
+        }
+    }
+
+    /// <summary>
+    /// Codex started outside Nuvio has no debugging port, so the wallpaper
+    /// silently disappears. Tell the user once and let a double-click start the
+    /// normal launcher; never restart their editor behind their back.
+    /// </summary>
+    private static void CheckConnection()
+    {
+        // The timer ticks every 2s; probing every tick would enumerate
+        // processes for no reason while Codex is closed.
+        var now = DateTime.UtcNow;
+        if ((now - lastConnectionCheck).TotalSeconds < 5)
+        {
+            return;
+        }
+        lastConnectionCheck = now;
+        try
+        {
+            var text = File.ReadAllText(statePath);
+            var match = Regex.Match(text, "\"port\"\\s*:\\s*(\\d+)");
+            if (!match.Success)
+            {
+                return;
+            }
+            var port = int.Parse(match.Groups[1].Value);
+            if (CanConnect(port))
+            {
+                offlineTicks = 0;
+                if (offline)
+                {
+                    offline = false;
+                    balloonShown = false;
+                    SetTooltip("Nuvio · 动态背景运行中");
+                    Trace("online: CDP responded again");
+                }
+                return;
+            }
+            if (!CodexRunning())
+            {
+                // Codex was closed on purpose; not an error.
+                offlineTicks = 0;
+                return;
+            }
+            offlineTicks++;
+            if (offlineTicks < 3)
+            {
+                return;
+            }
+            if (!offline)
+            {
+                offline = true;
+                SetTooltip("Nuvio · 背景未连接（双击恢复）");
+                Trace("offline: Codex is running without CDP");
+            }
+            if (!balloonShown)
+            {
+                balloonShown = true;
+                Notify(
+                    "Nuvio 背景未连接",
+                    "Codex 没有调试端口。双击托盘图标可重启 Codex 并恢复背景。"
+                );
+            }
+        }
+        catch
+        {
+            // A missing or half-written state file is handled by Watch().
+        }
+    }
+
+    private static bool CanConnect(int port)
+    {
+        try
+        {
+            using (var client = new TcpClient())
+            {
+                var task = client.ConnectAsync(IPAddress.Loopback, port);
+                if (!task.Wait(700))
+                {
+                    return false;
+                }
+                return client.Connected;
+            }
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool CodexRunning()
+    {
+        foreach (var name in new[] { "ChatGPT", "Codex" })
+        {
+            try
+            {
+                var list = Process.GetProcessesByName(name);
+                if (list.Length > 0)
+                {
+                    foreach (var process in list)
+                    {
+                        process.Dispose();
+                    }
+                    return true;
+                }
+            }
+            catch
+            {
+                // Keep checking the other process name.
+            }
+        }
+        return false;
+    }
+
+    private static void SetTooltip(string text)
+    {
+        try
+        {
+            var data = NewIconData();
+            data.uFlags = NIF_TIP;
+            data.szTip = text;
+            Shell_NotifyIconW(NIM_MODIFY, ref data);
+        }
+        catch
+        {
+            // Cosmetic.
+        }
+    }
+
+    private static void Notify(string title, string text)
+    {
+        try
+        {
+            var data = NewIconData();
+            data.uFlags = NIF_INFO;
+            data.szInfoTitle = title;
+            data.szInfo = text;
+            data.dwInfoFlags = NIIF_INFO;
+            data.uTimeoutOrVersion = 10000;
+            Shell_NotifyIconW(NIM_MODIFY, ref data);
+        }
+        catch
+        {
+            // Focus assist can suppress this; the tooltip still explains it.
+        }
+    }
+
+    private static void Restore()
+    {
+        var now = DateTime.UtcNow;
+        if ((now - lastRestoreClick).TotalSeconds < 20)
+        {
+            return;
+        }
+        lastRestoreClick = now;
+        balloonShown = true;
+        SetTooltip("Nuvio · 正在恢复背景…");
+        try
+        {
+            var vbs = Path.Combine(rootPath, "launch-hidden.vbs");
+            if (!File.Exists(vbs))
+            {
+                Trace("restore: launch-hidden.vbs is missing");
+                return;
+            }
+            var info = new ProcessStartInfo
+            {
+                FileName = "wscript.exe",
+                Arguments = "\"" + vbs + "\" --yes",
+                WorkingDirectory = rootPath,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+            Process.Start(info);
+            Trace("restore: launched the hidden launcher");
+        }
+        catch (Exception error)
+        {
+            Trace("restore failed: " + error.Message);
         }
     }
 

@@ -36,3 +36,18 @@ test('the icon survives injector replacement and is supervised', () => {
   assert.match(tray, /nuvio-tray-\$\{VERSION\}\.exe/,
     'compiling over a running exe fails on Windows; use a build-specific name');
 });
+
+test('offline Codex is reported, never restarted without a click', () => {
+  const csharp = readFileSync(new URL('../tools/tray/tray.cs', import.meta.url), 'utf8');
+  assert.match(csharp, /offlineTicks < 3/,
+    'a slow Codex start must not raise a false alarm');
+  assert.match(csharp, /Codex is running without CDP/);
+  assert.match(csharp, /launch-hidden\.vbs/);
+
+  const watch = csharp.slice(
+    csharp.indexOf('private static void Watch()'),
+    csharp.indexOf('private static void CheckConnection()'),
+  );
+  assert.doesNotMatch(watch, /Restore\(\)/,
+    'the timer must only notify; restarting Codex requires a user click');
+});

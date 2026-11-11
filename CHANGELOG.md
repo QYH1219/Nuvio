@@ -4,6 +4,14 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- **Offline background guard.** Codex launched outside Nuvio has no debugging
+  port, so the layer cannot attach. After 15 seconds with a Codex process alive
+  and no CDP listener, the tray tooltip changes to "背景未连接", shows one
+  balloon, and double-clicking runs `launch-hidden.vbs --yes`. It never restarts
+  the editor on its own; the menu also exposes the action explicitly.
+
 ## [0.7.3] - 2026-11-11
 
 ### Fixed
