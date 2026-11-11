@@ -8,7 +8,10 @@ rem Terminal window for start.cmd and leaves it sitting there for the whole
 rem session, which is exactly the black window users report.
 rem
 rem --console is the escape hatch for debugging: it keeps this console.
-if /I "%~1"=="--console" goto run_visible
+if /I "%~1"=="--console" (
+  shift
+  goto run_visible
+)
 if not defined NUVIO_HIDDEN (
   if exist "%~dp0launch-hidden.vbs" (
     wscript.exe "%~dp0launch-hidden.vbs" %*
@@ -39,11 +42,21 @@ if not defined NODE_BIN (
 )
 
 :have_node
+rem SHIFT does not change %%*: collect the remaining arguments explicitly so
+rem --console is not accidentally forwarded to the injector as an unknown flag.
+set "NUVIO_ARGS="
+:collect_args
+if "%~1"=="" goto args_ready
+set "NUVIO_ARGS=%NUVIO_ARGS% "%~1""
+shift
+goto collect_args
+:args_ready
+
 if defined NUVIO_HIDDEN (
   echo [nuvio] %DATE% %TIME% launch>>"%NUVIO_LOG%"
-  "%NODE_BIN%" tools\start.mjs %* >>"%NUVIO_LOG%" 2>&1
+  "%NODE_BIN%" tools\start.mjs %NUVIO_ARGS% >>"%NUVIO_LOG%" 2>&1
 ) else (
-  "%NODE_BIN%" tools\start.mjs %*
+  "%NODE_BIN%" tools\start.mjs %NUVIO_ARGS%
 )
 set "CXD_EXIT=%ERRORLEVEL%"
 if not "%CXD_EXIT%"=="0" (

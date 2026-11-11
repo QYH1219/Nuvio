@@ -9,6 +9,26 @@ permissions:
   contents: read
 
 jobs:
+  windows-launcher:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Test Windows configuration and launcher paths
+        run: node --test test/magpie-config.test.mjs test/magpie-preflight.test.mjs test/launcher.test.mjs
+      - name: Parse compatibility scripts with Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          Get-ChildItem tools/compat/*.ps1 | ForEach-Object {
+            $tokens = $null
+            $parseErrors = $null
+            $null = [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$tokens, [ref]$parseErrors)
+            if ($parseErrors.Count) { throw ($parseErrors.Message -join '; ') }
+          }
   build:
     runs-on: ubuntu-latest
     steps:

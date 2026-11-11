@@ -3,8 +3,11 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline/promises';
+import { createHash } from 'node:crypto';
+import { createServer } from 'node:net';
 import { waitForPageTarget } from './target-score.mjs';
 import { ensureTray } from './tray.mjs';
+import { runMagpiePreflight, startMagpieWatch } from './magpie-preflight.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const BUNDLE = join(ROOT, 'dist-embed', 'codex-dynamic-bg.iife.js');
@@ -13,6 +16,10 @@ const STATE_FILE = join(ROOT, '.cxd-inject.json');
 const LOG_FILE = join(ROOT, '.nuvio', 'injector.log');
 const IS_WIN = process.platform === 'win32';
 const VERSION = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).version;
+const INJECTOR_BUILD = createHash('sha1')
+  .update(readFileSync(join(ROOT, 'tools', 'inject.mjs')))
+  .digest('hex')
+  .slice(0, 8);
 
 /**
  * The injector runs without a window, so the notification-area icon is the
@@ -37,7 +44,7 @@ function parseArgs(argv) {
     build: false,
     noBuild: false,
     launch: true,
-    restart: false,
+    restart: null,
     yes: false,
     detach: true,
     force: false,
@@ -108,6 +115,24 @@ function sleep(ms) {
   return new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
 }
 
+// Named pipes are kernel-owned: simultaneous launchers cannot both acquire
+// one, and crashes release it without a stale PID file or PID-reuse race.
+async function acquireLauncherLock() {
+  if (!IS_WIN) return null;
+  const key = createHash('sha256').update(ROOT.toLowerCase()).digest('hex');
+  const server = createServer((socket) => socket.destroy());
+  return new Promise((resolvePromise, reject) => {
+    server.once('error', (error) => {
+      if (error.code === 'EADDRINUSE') reject(new Error('another Nuvio launcher is still starting; wait for it to finish'));
+      else reject(error);
+    });
+    server.listen(`\\\\.\\pipe\\nuvio-start-${key}`, () => {
+      server.unref();
+      resolvePromise(server);
+    });
+  });
+}
+
 function run(command, args) {
   const result = spawnSync(command, args, {
     cwd: ROOT,
@@ -164,7 +189,7 @@ function findCodexProcesses() {
     const names = (result.stdout || '')
       .split(/\r?\n/)
       .map((line) => line.split('","')[0].replace(/^"/, ''))
-      .filter((name) => /^chatgpt(\.exe)?$/i.test(name));
+      .filter((name) => /^(chatgpt|codex)(\.exe)?$/i.test(name));
     return [...new Set(names)];
   } catch {
     return [];
@@ -228,20 +253,29 @@ async function stopCodex() {
 }
 
 async function probeInjector() {
-  try {
-    const response = await fetch('http://127.0.0.1:5276/status', {
-      signal: AbortSignal.timeout(800),
-    });
-    if (!response.ok) return null;
-    const status = await response.json();
-    return status && status.ok ? status : null;
-  } catch {
-    return null;
+  // The control server falls forward when 5276 is occupied. Its actual port
+  // is persisted only after injection, so retry callers re-read each time.
+  const ports = new Set([readState()?.controlPort, 5276]);
+  for (const port of ports) {
+    if (!Number.isInteger(port) || port < 1 || port > 65535) continue;
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/status`, {
+        signal: AbortSignal.timeout(800),
+      });
+      if (!response.ok) continue;
+      const status = await response.json();
+      if (status?.ok && Number.isInteger(status.cdpPort) && isOurInjector(status.pid)) return status;
+    } catch {
+      /* unavailable or not our control server */
+    }
   }
+  return null;
 }
 
 async function stopInjector(status) {
-  if (!status?.pid) return;
+  // Revalidate even a previously healthy status: startup may have waited for
+  // a page/restart prompt long enough for that PID to have been recycled.
+  if (!isOurInjector(status?.pid)) return;
   killTree(status.pid);
   await sleep(600);
 }
@@ -273,7 +307,7 @@ function commandLineOf(pid) {
         '-NoProfile',
         '-NonInteractive',
         '-Command',
-        `$p = Get-CimInstance Win32_Process -Filter "ProcessId=${Number(pid)}"; if ($p) { $p.CommandLine }`,
+        `[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false); $p = Get-CimInstance Win32_Process -Filter "ProcessId=${Number(pid)}"; if ($p) { $p.CommandLine }`,
       ],
       { encoding: 'utf8', windowsHide: true, timeout: 8000 },
     );
@@ -293,21 +327,39 @@ function pidAlive(pid) {
   }
 }
 
+function isOurInjector(pid) {
+  if (!Number.isInteger(pid) || pid <= 0 || !pidAlive(pid)) return false;
+  const script = join(ROOT, 'tools', 'inject.mjs').replaceAll('\\', '/');
+  const command = commandLineOf(pid).replaceAll('\\', '/');
+  const escaped = script.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // Require a complete argument, not another checkout or inject.mjs.bak.
+  return new RegExp(`(?:^|\\s)(?:"${escaped}"|'${escaped}'|${escaped})(?=\\s|$)`, IS_WIN ? 'i' : '').test(command);
+}
+
 /**
  * A crashed start can leave a detached injector that no longer answers on its
  * control port. Only kill a pid that is provably our inject.mjs, never a random
  * Node process that happens to have reused the pid.
  */
-async function cleanupOrphanInjector() {
+async function cleanupOrphanInjector(port) {
+  const status = await probeInjector();
   const state = readState();
-  if (!state?.pid || !pidAlive(Number(state.pid))) return;
-  // A healthy injector answers on its control port; never kill it just because
-  // the user double-clicked the shortcut again.
-  if (await probeInjector()) return;
-  const command = commandLineOf(Number(state.pid));
-  if (!/inject\.mjs/i.test(command)) return;
-  console.log(`[nuvio] cleaning up stale injector (pid ${state.pid}) ...`);
-  killTree(state.pid);
+  const pid = Number(status?.pid || state?.pid || 0);
+  if (!pid || !pidAlive(pid)) return;
+  // A resident injector that watches this port is healthy even while Codex is
+  // closed: it reattaches by itself. Never kill it just because the user
+  // double-clicked the shortcut again.
+  if (status && Number(status.cdpPort) === Number(port)) return;
+  // Only kill a pid that is provably our inject.mjs, never a random Node
+  // process that happens to have reused the pid.
+  if (!isOurInjector(pid)) return;
+  if (status) {
+    console.log(`[nuvio] injector (pid ${pid}) is watching port ${status.cdpPort}, not ${port}; replacing it ...`);
+  } else {
+    console.log(`[nuvio] cleaning up stale injector (pid ${pid}) ...`);
+  }
+  killTree(pid);
+  await sleep(600);
 }
 
 async function waitForInjector(seconds) {
@@ -459,6 +511,8 @@ async function main() {
     throw new Error(`Node.js 22+ is required, found ${process.version}`);
   }
 
+  const launcherLock = await acquireLauncherLock();
+  try {
   console.log(`[nuvio] Nuvio v${VERSION}`);
 
   const needsBuild = options.build || !existsSync(BUNDLE) || !existsSync(VENDOR_DRACO);
@@ -475,7 +529,8 @@ async function main() {
     throw new Error('missing dist-embed bundle; run npm run embed (or drop --no-build)');
   }
 
-  await cleanupOrphanInjector();
+  await runMagpiePreflight({ launch: options.launch });
+  await cleanupOrphanInjector(options.port);
 
   // A resident injector already keeps the saved layer alive across page
   // reloads. Double-clicking the desktop shortcut again should be harmless,
@@ -490,23 +545,42 @@ async function main() {
         `[nuvio] Codex has no page window right now; keeping the resident injector (pid ${existing.pid}) alive.`,
       );
       console.log('[nuvio] it reattaches by itself as soon as the window is back. Nothing was changed.');
+      // Magpie still rewrites config.toml when it attaches to the window that
+      // comes back later, so keep the short reconciler armed on this path too.
+      startMagpieWatch();
       return;
     }
     console.log(`[nuvio] replacing the running injector (pid ${existing.pid}) ...`);
     await stopInjector(existing);
   } else if (existing) {
     const cdpAlive = await probeCdp(options.port);
-    if (cdpAlive) {
+    const stale = existing.version !== VERSION || existing.build !== INJECTOR_BUILD;
+    if (cdpAlive && !stale) {
       console.log(`[nuvio] already running (pid ${existing.pid}); the saved background is active.`);
       console.log('[nuvio] use --force to reload the injector.');
       showTray();
+      // A relaunch is exactly when Magpie's own autostart runs again, so the
+      // early return must not skip the ultra reconciler.
+      startMagpieWatch();
       await checkForUpdate();
       return;
     }
-    // Keep the injector: it reattaches by itself as soon as Codex is back with
-    // the same debugging port. Killing it would only lose the saved session.
-    console.log(`[nuvio] injector (pid ${existing.pid}) is waiting for Codex ...`);
-    showTray();
+    if (stale) {
+      // A resident injector keeps running the code it was started with. After
+      // an update that would silently keep old bugs (dead CDP socket, no
+      // reattach) forever, so replace it once instead of trusting the pid.
+      // Replace it even while Codex is closed: otherwise it keeps the lock and
+      // the injector spawned below exits with "already running".
+      console.log(
+        `[nuvio] injector (pid ${existing.pid}) is from an older Nuvio build; reloading it ...`,
+      );
+      await stopInjector(existing);
+    } else {
+      // Keep the injector: it reattaches by itself as soon as Codex is back
+      // with the same debugging port. Killing it would only lose the session.
+      console.log(`[nuvio] injector (pid ${existing.pid}) is waiting for Codex ...`);
+      showTray();
+    }
   }
 
   let cdpReady = await probeCdp(options.port);
@@ -521,6 +595,9 @@ async function main() {
       cdpReady = await waitForCdp(options.port, Math.min(options.wait, 5));
     }
     if (running.length && !cdpReady) {
+      if (options.restart === false) {
+        throw new Error('Codex has no debugging port; --no-restart keeps the current window. Quit Codex and start Nuvio again.');
+      }
       if (!options.restart) {
         if (!options.yes) {
           console.log('');
@@ -539,6 +616,11 @@ async function main() {
         }
       }
       console.log('[nuvio] Codex is running without a debugging port; restarting it once ...');
+      // The resident injector is bound to the old renderer. Leaving it alive
+      // makes it hold the lock, so the injector we spawn after the restart
+      // exits with "another injector is already running" and the launcher then
+      // reports the old, zombie pid as ready.
+      await stopInjector(existing);
       await stopCodex();
     }
 
@@ -551,6 +633,11 @@ async function main() {
       );
     }
   }
+
+  // Magpie attaches to the new Codex window and rewrites config.toml a few
+  // seconds from now, after the synchronous preflight has already returned.
+  // Keep a short detached reconciler alive so the model picker keeps ultra.
+  startMagpieWatch();
 
   const injectArgs = [
     join(ROOT, 'tools', 'inject.mjs'),
@@ -610,6 +697,9 @@ async function main() {
     process.exitCode = code ?? 1;
   });
   await checkForUpdate();
+  } finally {
+    launcherLock?.close();
+  }
 }
 
 main().catch((error) => {

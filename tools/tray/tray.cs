@@ -57,11 +57,14 @@ internal static class Program
     private static string iconPath = "";
     private static string rootPath = "";
     private static string selfPath = "";
+    private static string version = "";
     private static IntPtr window;
     private static IntPtr icon;
     private static WndProc proc;
     private static uint taskbarCreated;
     private static string className = "NuvioTrayWindow";
+    private static int missingStateTicks;
+    private static int deadPidTicks;
 
     // Environment.ProcessPath is .NET 6+; the in-box csc targets .NET Framework.
     private static string SelfPath
@@ -120,6 +123,9 @@ internal static class Program
                 case "--root":
                     rootPath = args[++index];
                     break;
+                case "--version":
+                    version = args[++index];
+                    break;
             }
         }
 
@@ -128,13 +134,26 @@ internal static class Program
             return 2;
         }
 
-        bool created;
-        using (var mutex = new Mutex(true, @"Local\NuvioTrayIcon", out created))
+        // A relaunch replaces the injector and therefore the tray at nearly the
+        // same moment. The old helper needs a beat to release its mutex; exiting
+        // instantly on "not created" is what left the user with no icon at all.
+        Mutex mutex = null;
+        var created = false;
+        for (var attempt = 0; attempt < 8; attempt++)
         {
-            if (!created)
-            {
-                return 0;
-            }
+            mutex = new Mutex(true, @"Local\NuvioTrayIcon", out created);
+            if (created) break;
+            mutex.Dispose();
+            mutex = null;
+            Thread.Sleep(500);
+        }
+        if (mutex == null)
+        {
+            Trace("another tray is already running");
+            return 0;
+        }
+        using (mutex)
+        {
             return Run();
         }
     }
@@ -198,6 +217,8 @@ internal static class Program
         }
 
         PromoteIcon();
+        Heartbeat();
+        Trace("tray started pid=" + Process.GetCurrentProcess().Id + " version=" + version);
         SetTimer(window, (UIntPtr)1, 2000, IntPtr.Zero);
 
         MSG message;
@@ -323,13 +344,23 @@ internal static class Program
 
     private static void Watch()
     {
+        Heartbeat();
+
         if (!File.Exists(statePath))
         {
-            // /restore deletes the state file; the injector is gone and a tray
-            // icon that outlives it would be a lie.
-            Exit();
+            // A relaunch deletes and rewrites the state file within a few
+            // seconds. Only treat it as gone after three ticks (6s), otherwise
+            // the icon disappears exactly when the injector is being replaced.
+            missingStateTicks++;
+            if (missingStateTicks >= 3)
+            {
+                // /restore deletes the state file; the injector is gone and a
+                // tray icon that outlives it would be a lie.
+                Exit("state file removed");
+            }
             return;
         }
+        missingStateTicks = 0;
 
         try
         {
@@ -343,12 +374,24 @@ internal static class Program
             var process = Process.GetProcessById(pid);
             if (process.HasExited)
             {
-                Exit();
+                deadPidTicks++;
+                if (deadPidTicks >= 3)
+                {
+                    Exit("injector pid " + pid + " is gone");
+                }
+            }
+            else
+            {
+                deadPidTicks = 0;
             }
         }
         catch (ArgumentException)
         {
-            Exit();
+            deadPidTicks++;
+            if (deadPidTicks >= 3)
+            {
+                Exit("injector pid is gone");
+            }
         }
         catch (IOException)
         {
@@ -359,14 +402,51 @@ internal static class Program
     private static void Quit()
     {
         Post("/restore", "{\"keepConfig\":true}");
-        Exit();
+        Exit("user quit");
     }
 
-    private static void Exit()
+    private static void Exit(string reason)
     {
+        Trace("exit: " + reason);
+        try
+        {
+            var beat = Path.Combine(rootPath, ".nuvio", "tray.heartbeat");
+            File.Delete(beat);
+        }
+        catch
+        {
+            // Best effort; a stale heartbeat only costs one duplicate spawn.
+        }
         RemoveIcon();
         DestroyWindow(window);
         PostQuitMessage(0);
+    }
+
+    /// <summary>
+    /// The injector watches this file and restarts the tray if it goes stale.
+    /// Without a supervisor one mutex race is enough to lose the icon for the
+    /// rest of the session.
+    /// </summary>
+    private static void Heartbeat()
+    {
+        try
+        {
+            if (rootPath.Length == 0)
+            {
+                return;
+            }
+            var folder = Path.Combine(rootPath, ".nuvio");
+            Directory.CreateDirectory(folder);
+            File.WriteAllText(
+                Path.Combine(folder, "tray.heartbeat"),
+                Process.GetCurrentProcess().Id + " " + version + " " +
+                    DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+            );
+        }
+        catch
+        {
+            // Diagnostics must never break the icon.
+        }
     }
 
     private static bool Post(string path, string json)

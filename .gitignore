@@ -37,3 +37,7 @@ docs/icon-concepts/
 .nuvio/
 exports/
 
+# Local debugging scratch
+_diag/
+tools/_recon_magpie.ps1
+

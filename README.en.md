@@ -95,6 +95,29 @@ The launcher installs missing dependencies, builds the injection bundle, checks 
 - The injector runs hidden in the background and logs to `.nuvio/injector.log`; stop it with `npm run restore`, or use `npm start -- --foreground` for an attached console.
 - CDP already handled elsewhere: `npm start -- --no-launch`. Force a rebuild: `npm start -- --build`.
 
+#### Magpie coexistence
+
+On Windows, shortcuts, `npm start`, and restart share one bounded, hidden
+preflight. When Magpie is installed, it waits for the local gateway, applies
+`88api/gpt-6.1-sol` / `ultra` through Magpie's CLI, and sets the desktop effort
+list to `ultra / high / medium`. Configuration edits keep UTF-8 paths and other
+tables intact and create `config.toml.nuvio-backup-*` before changes. Missing
+Magpie is skipped; a failed preflight warns but does not prevent Nuvio starting.
+
+The launch pin then verifies for 10 seconds (returning early once the file has
+been stable for 3) and re-pins on drift. After that a bounded, hidden 30-second
+watcher covers the window where Magpie's own autostart rewrites `config.toml`
+again a few seconds after Codex opens; it retries at most 8 times and exits on
+its own. This is deliberately not a permanent lock: changing settings in Magpie
+later still wins. Set `NUVIO_SKIP_MAGPIE=1` before launch to keep your own model
+selection. `--help` and `--no-launch` skip the preflight. Logs:
+`%TEMP%\nuvio\magpie-ultra.log`. `--no-restart` keeps the current Codex window
+even when `--yes` is also present.
+
+An HTTP 200 response with `reasoning_tokens` confirms reasoning output; it does
+not independently establish that a third-party provider honored the requested
+effort level without substituting another level.
+
 #### Wallpaper bundles, portable build, autostart
 
 ```powershell

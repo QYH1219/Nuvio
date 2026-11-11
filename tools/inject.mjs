@@ -8,6 +8,7 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  renameSync,
   rmSync,
   statSync,
   unlinkSync,
@@ -28,10 +29,15 @@ import {
 } from './library.mjs';
 import { getAutostartStatus, setAutostart } from './autostart.mjs';
 import { selectTargetOrNull, waitForPageTarget } from './target-score.mjs';
+import { ensureTray, trayAlive } from './tray.mjs';
 import { findEntry, scanWorkshop, watchWorkshop } from './workshop-scan.mjs';
 import { readZip } from './zip.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
+const VERSION = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).version;
+// Semver alone cannot tell two builds apart during development, and an old
+// resident process would keep its bugs forever. Hash the code we are running.
+const BUILD = createHash('sha1').update(readFileSync(fileURLToPath(import.meta.url))).digest('hex').slice(0, 8);
 const DEFAULT_BUNDLE = join(ROOT, 'dist-embed', 'codex-dynamic-bg.iife.js');
 const STATE_FILE = join(ROOT, '.cxd-inject.json');
 const LOCK_FILE = join(ROOT, '.nuvio', 'injector.lock');
@@ -357,8 +363,27 @@ function acquireLock() {
       /* unreadable lock */
     }
     if (processAlive(pid) && pid !== process.pid) return false;
-    writeFileSync(LOCK_FILE, `${process.pid}\n`);
-    return true;
+    // Take the stale lock over with an atomic rename: when two injectors read
+    // the same dead pid, only one rename succeeds, so only one can proceed.
+    const stale = `${LOCK_FILE}.stale-${process.pid}-${Date.now()}`;
+    try {
+      renameSync(LOCK_FILE, stale);
+    } catch {
+      /* another contender already took it */
+    }
+    try {
+      unlinkSync(stale);
+    } catch {
+      /* not ours */
+    }
+    try {
+      const fd = openSync(LOCK_FILE, 'wx');
+      writeFileSync(fd, `${process.pid}\n`);
+      closeSync(fd);
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
 
@@ -921,6 +946,17 @@ class CdpClient {
   }
 }
 
+/**
+ * A CDP WebSocket can stay in OPEN after the renderer process dies (half-open
+ * socket), so `readyState === 1` alone is not proof that the page still
+ * exists. Compare the registered target id with the live target list.
+ */
+export function cdpTargetState(list, targetId) {
+  if (!Array.isArray(list)) return 'unknown';
+  if (!targetId) return 'gone';
+  return list.some((entry) => entry && entry.id === targetId) ? 'alive' : 'gone';
+}
+
 async function getTargets(port) {
   const response = await fetch(`http://127.0.0.1:${port}/json/list`);
   if (!response.ok) throw new Error(`CDP target list failed: HTTP ${response.status}`);
@@ -1071,7 +1107,7 @@ async function main() {
   // `targets` may be non-empty but contain only browser windows while Codex
   // swaps renderers, so wait for a genuine page window instead of dying on a
   // transient empty page list.
-  const target =
+  let target =
     selectTargetOrNull(targets, options.target) ||
     (await waitForPageWindow(options.port, options.target, Math.max(options.wait, 10)));
   console.log(`[nuvio] target: ${target.title || target.url}`);
@@ -1174,6 +1210,10 @@ async function main() {
   const injectedAt = new Date().toISOString();
   const controlStatus = {
     pid: process.pid,
+    // The launcher replaces an injector left over from an older build: its
+    // half-open socket fix or reattach logic must actually reach the user.
+    version: VERSION,
+    build: BUILD,
     cdpPort: options.port,
     target: target.title || target.url,
     targetId: target.id,
@@ -1281,8 +1321,11 @@ async function main() {
 
   function persistState(identifier, activeTarget) {
     try {
+      // Write-then-rename: the tray and launcher poll this file, and a torn
+      // JSON read used to look like "injector gone" for one tick.
+      const temp = `${STATE_FILE}.tmp-${process.pid}`;
       writeFileSync(
-        STATE_FILE,
+        temp,
         `${JSON.stringify(
           {
             port: options.port,
@@ -1299,9 +1342,20 @@ async function main() {
           2,
         )}\n`,
       );
+      renameSync(temp, STATE_FILE);
       stateWritten = true;
     } catch (error) {
       console.warn(`[nuvio] could not write ${STATE_FILE}: ${error.message}`);
+    }
+  }
+
+  /** Never delete a state file another injector has already replaced. */
+  function removeStateIfOurs() {
+    try {
+      const current = JSON.parse(readFileSync(STATE_FILE, 'utf8'));
+      if (Number(current?.pid) === process.pid) unlinkSync(STATE_FILE);
+    } catch {
+      /* missing or half-written */
     }
   }
 
@@ -1334,13 +1388,7 @@ async function main() {
     shuttingDown = true;
     closeResources();
     releaseLock();
-    if (stateWritten) {
-      try {
-        unlinkSync(STATE_FILE);
-      } catch {
-        /* ignore */
-      }
-    }
+    if (stateWritten) removeStateIfOurs();
     setTimeout(() => process.exit(0), 150).unref();
   }
 
@@ -1489,6 +1537,23 @@ async function main() {
 
     persistState(registered, target);
 
+    // A tray helper is a separate process: it can be killed, crash, or lose a
+    // startup race with the previous injector. Supervise it from the process
+    // that actually lives as long as the background does.
+    let nextTrayCheck = 0;
+    let trayRetryAt = 0;
+    const maybeEnsureTray = (force = false) => {
+      if (process.env.NUVIO_NO_TRAY === '1' || options.once) return;
+      const now = Date.now();
+      if (!force && now < nextTrayCheck) return;
+      nextTrayCheck = now + 30000;
+      if (now < trayRetryAt) return;
+      if (trayAlive(now)) return;
+      // Without a compiler this can never succeed; do not retry every tick.
+      if (!ensureTray({ quiet: true })) trayRetryAt = now + 300000;
+    };
+    maybeEnsureTray(true);
+
     console.log('[nuvio] injected.');
     if (options.once) {
       cdp.close();
@@ -1508,13 +1573,48 @@ async function main() {
     // back with the same CDP port, re-register the layer automatically instead
     // of asking the user to double-click the shortcut again.
     let reattaching = false;
+    let targetStrikes = 0;
+    let lastTargetCheck = 0;
     const watcher = setInterval(async () => {
-      if (shuttingDown || reattaching || cdp?.isOpen()) return;
+      if (shuttingDown || reattaching) return;
+      maybeEnsureTray();
+      if (cdp?.isOpen()) {
+        // A dead renderer leaves the socket OPEN. Poll the target list a few
+        // times per minute so a half-open connection heals without a relaunch.
+        if (Date.now() - lastTargetCheck < 8000) return;
+        lastTargetCheck = Date.now();
+        let state = 'unknown';
+        try {
+          state = cdpTargetState(await getTargets(options.port), controlStatus.targetId);
+        } catch {
+          // The debugging port itself is down: Codex quit, so the socket is
+          // dead even if it still reports OPEN.
+          state = 'unknown';
+        }
+        if (state === 'alive') {
+          targetStrikes = 0;
+          return;
+        }
+        // Two consecutive misses avoid reloading a healthy page on one
+        // transient fetch failure.
+        targetStrikes += 1;
+        if (targetStrikes < 2) return;
+        targetStrikes = 0;
+        console.warn('[nuvio] CDP target disappeared; reconnecting');
+        try {
+          cdp?.close();
+        } catch {
+          /* ignore */
+        }
+        return;
+      }
+      targetStrikes = 0;
       reattaching = true;
+      let client = null;
       try {
         const list = await getTargets(options.port);
         const next = selectTarget(list, options.target);
-        const client = await CdpClient.connect(next.webSocketDebuggerUrl);
+        client = await CdpClient.connect(next.webSocketDebuggerUrl);
         await client.send('Page.enable');
         await client.send('Runtime.enable');
         try {
@@ -1535,13 +1635,22 @@ async function main() {
           /* ignore */
         }
         cdp = client;
+        client = null;
         registered = nextRegistration;
         target = next;
         controlStatus.target = next.title || next.url;
         controlStatus.targetId = next.id;
         persistState(registered, next);
+        lastTargetCheck = Date.now();
         console.log(`[nuvio] reattached to ${next.title || next.url}`);
       } catch {
+        // Never leak a half-initialized socket; it would keep the old page
+        // paused and slowly accumulate connections across retries.
+        try {
+          client?.close();
+        } catch {
+          /* ignore */
+        }
         /* Codex is not back yet; retry on the next tick. */
       } finally {
         reattaching = false;
@@ -1561,13 +1670,7 @@ async function main() {
     // A startup failure must not leave a lock owned by this dead pid; the next
     // launch would otherwise believe an injector is still running.
     releaseLock();
-    if (stateWritten) {
-      try {
-        unlinkSync(STATE_FILE);
-      } catch {
-        /* ignore */
-      }
-    }
+    if (stateWritten) removeStateIfOurs();
     throw error;
   }
 }

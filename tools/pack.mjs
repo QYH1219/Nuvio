@@ -66,7 +66,10 @@ function collect() {
     'tools/tray/tray.cs',
   ];
   for (const file of walk(join(ROOT, 'tools'))) {
-    if (file.endsWith('.mjs')) files.push(relative(ROOT, file).replace(/\\/g, '/'));
+    const name = relative(ROOT, file).replace(/\\/g, '/');
+    if (file.endsWith('.mjs') || (name.startsWith('tools/compat/') && file.endsWith('.ps1'))) {
+      files.push(name);
+    }
   }
   for (const file of walk(join(ROOT, 'public', 'vendor'))) {
     files.push(relative(ROOT, file).replace(/\\/g, '/'));

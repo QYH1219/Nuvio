@@ -104,6 +104,25 @@ npm run shortcut -- --dry-run # 只看会写入什么，不创建文件
 生成的快捷方式带仓库自带的 `public/icon.ico`，工作目录指向仓库根目录，所以从任何位置双击都能跑。启动窗口默认最小化，点任务栏图标可以看日志。
 
 - 已经在运行但没有调试端口的 Codex 默认会先询问；`npm start -- --yes` 直接同意，`npm start -- --restart` 跳过询问自动重启，`npm start -- --no-restart` 保留当前窗口。当前壁纸始终从本地保存的素材和参数恢复。
+
+#### Magpie 共存
+
+Windows 的桌面快捷方式、`npm start` 和重启入口共用一次启动预检。
+如果检测到 Magpie，预检会等待本地网关，然后通过 Magpie CLI 应用
+`88api/gpt-6.1-sol` / `ultra`，并把 Codex 档位列表设为 `ultra / high / medium`。
+修改配置前会在 Codex 配置目录创建 `config.toml.nuvio-backup-*`；UTF-8 中文路径和其他配置段会保留。
+缺少 Magpie 时直接跳过；预检失败时记录警告，Nuvio 继续启动。
+
+启动后它会继续盯 10 秒：配置稳定 3 秒就提前结束，一旦被 Magpie 改写就重新 pin 回去。
+随后再挂一个 30 秒的隐藏守护进程（有界，最多重试 8 次），专门对付“Codex 起来几秒后
+Magpie 自启再覆盖一遍”这个时间差。窗口结束后在 Magpie 里切换配置仍会生效——它不是
+常驻锁，也不该是。若需要保留自己选择的模型，在启动 Nuvio 前设置环境变量
+`NUVIO_SKIP_MAGPIE=1`。
+`--help` 和 `--no-launch` 会跳过预检。诊断日志在 `%TEMP%\nuvio\magpie-ultra.log`。
+`--no-restart` 会保留当前窗口，即使同时传入 `--yes` 也不重启。
+
+档位是否被服务商实际执行，取决于服务商实现；HTTP 200 和 `reasoning_tokens`
+只能证明请求成功并产生推理输出，不能单独证明没有被降档。
 - 常驻注入器已经在跑时，再次双击快捷方式只会复用现有实例，不会重复起端口；要强制换一个新实例用 `npm start -- --force`。
 - 注入成功后注入器转入后台隐藏运行，日志写到 `.nuvio/injector.log`；要停止它用 `npm run restore`。需要前台实时日志时用 `npm start -- --foreground`。
 - 只想注入、自己负责启动 Codex：`npm start -- --no-launch`；只重新构建：`npm start -- --build`。
@@ -114,10 +133,11 @@ npm run shortcut -- --dry-run # 只看会写入什么，不创建文件
 
 - 双击：重新加载背景。
 - 右键：重新加载背景 / 切换到 Codex / 打开日志 / 恢复并退出（保留壁纸设置）。
-- 注入器退出、崩溃或 `npm run restore` 之后，图标会在两秒内自动消失，不会留一个假的“运行中”。
+- 注入器退出、崩溃或 `npm run restore` 之后，图标会在 6 秒内自动消失，不会留一个假的“运行中”。
+- 图标被任务管理器杀掉、或启动时和旧图标撞车，注入器会在 30 秒内自动把它拉回来；不需要再点快捷方式。
 - Explorer 重启后图标会自动回来。
 
-图标用系统自带的 `csc.exe` 从 `tools/tray/tray.cs` 现场编译，缓存在 `.nuvio/nuvio-tray.exe`，仓库里不放二进制。不想要托盘就设 `NUVIO_NO_TRAY=1`。
+图标用系统自带的 `csc.exe` 从 `tools/tray/tray.cs` 现场编译，按内容哈希缓存在 `.nuvio/nuvio-tray-<build>.exe`，仓库里不放二进制。换版本时不会因为旧 exe 正在运行而编译失败。不想要托盘就设 `NUVIO_NO_TRAY=1`。
 
 #### 壁纸包、便携版与开机自启
 

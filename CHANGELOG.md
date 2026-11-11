@@ -2,6 +2,88 @@
 
 All notable changes to this project are documented here.
 
+## [Unreleased]
+
+## [0.7.3] - 2026-11-11
+
+### Fixed
+
+- **The tray icon disappeared again after a relaunch.** Three separate races:
+  the replacement helper exited instantly while the previous mutex was still
+  held; it treated the state file's momentary absence during an injector swap
+  as "injector gone"; and nothing restarted it after it died. The helper now
+  waits up to 4 seconds for the mutex, tolerates three missing ticks (6s), and
+  writes `.nuvio/tray.heartbeat`; the resident injector checks that heartbeat
+  (pid included) every 30 seconds and restarts a dead helper. A fresh heartbeat
+  whose pid is already gone no longer counts as alive.
+- Compile the helper to a content-addressed `nuvio-tray-<build>.exe` and stop
+  older helpers before starting the new one. Rebuilding over a running exe
+  fails with a sharing violation on Windows, which previously left the upgrade
+  with no icon at all.
+- **Reattach threw on every Codex restart.** `target` was declared `const` but
+  assigned again after a successful reconnect, so the assignment raised
+  "Assignment to constant variable"; the empty catch hid it and the next target
+  check compared the new page with the old target id. The result was a reload
+  loop every few seconds. Declare it mutable and close a half-initialized CDP
+  client when a reconnect attempt fails instead of leaking the socket.
+- `/status` now carries a content hash of `inject.mjs`; the launcher replaces a
+  resident injector whose hash differs even when the semver string is unchanged.
+- Take over a stale lock with an atomic rename instead of overwriting it, and
+  write the state file with write-then-rename. Exit only deletes a state file
+  whose `pid` still matches this process.
+- **Two launchers could run at once.** Windows now holds a kernel-owned named
+  pipe per checkout for the whole start sequence; the second double-click exits
+  with a clear message. Injector probes read `controlPort` from the state file
+  before falling back to 5276, accept `Codex.exe` as well as `ChatGPT.exe`, and
+  require the full `tools/inject.mjs` path (not `inject.mjs.bak`, not another
+  checkout) before stopping a PID.
+- Magpie's watch CLI call is bounded (10s per command, capped by the remaining
+  watch window) and a per-config named mutex prevents repeated launches from
+  stacking reconcilers. A missing `powershell.exe` in `startMagpieWatch` is
+  handled instead of crashing the launcher.
+- **Magpie coexistence.** Starting Magpie rewrote `~/.codex/config.toml`,
+  which switched the Codex model back to Magpie's own default and dropped the
+  `ultra` effort from the picker. The launcher now runs
+  `tools/compat/magpie-ultra.ps1` before Codex starts: it brings up Magpie's
+  local gateway when needed, pins the model and effort through Magpie's own
+  CLI, and trims `[desktop].enabled-reasoning-efforts` to
+  `ultra`/`high`/`medium`. Machines without Magpie are unaffected.
+- Run that preflight in the shared Node launcher so terminal starts and
+  restarts receive the same behavior as the hidden shortcut. Include both
+  PowerShell dependencies in portable archives; bound the subprocess lifetime.
+- Scope effort edits to `[desktop]`, support multiline arrays and inline table
+  comments, preserve Unicode/line endings, back up configuration and reject
+  detected concurrent edits. Re-read effort after model changes and verify CLI
+  success before narrowing the picker. Never log provider CLI output.
+- Honor explicit `--no-restart` even with `--yes`, consume `--console` before
+  forwarding arguments, and keep Magpie fallback startup hidden.
+- Add Windows PowerShell 5.1 fixture tests and a Windows CI job. Document that
+  launch-time restoration is not a persistent configuration lock and that token
+  usage alone does not establish provider effort fidelity.
+- **Ultra survived only until Magpie attached.** `magpie.exe` is a GUI-subsystem
+  binary, so `& magpie codex …` returned immediately with `$LASTEXITCODE = $null`
+  and the old helper treated every successful call as a failure. Apply the model
+  and effort through `Start-Process -Wait -PassThru` and check the real exit
+  code. Verify the pin for 10 seconds (early exit after 3 stable seconds) and
+  re-pin on drift instead of writing once and hoping.
+- Keep a bounded, detached 30-second reconciler alive after launch, because
+  Magpie's own autostart rewrites `config.toml` seconds *after* Codex opens.
+  It retries at most 8 times and exits by itself. The early-return paths
+  ("already running", "no page window yet") arm it too.
+- **Zombie injector blocked the next launch.** A resident injector whose
+  `/status` reports a different CDP port is now treated as orphaned and stopped
+  before Codex restarts, so the replacement no longer dies with
+  "another injector is already running" while the launcher reports the dead pid
+  as ready.
+- A resident injector keeps executing the code it started with, so after an
+  update the old process would silently keep every bug it was launched with.
+  `/status` now carries the build version and the launcher replaces an injector
+  whose version does not match, instead of reporting it as active.
+- **Half-open CDP socket never healed.** While the WebSocket still looked open,
+  the injector now checks the DevTools target every 8 seconds and reconnects
+  after two consecutive misses. Probe failures count as "unknown" and never
+  trigger a reconnect, so a slow `/json/list` cannot drop a healthy link.
+
 ## [0.7.2] - 2026-11-09
 
 ### Added
